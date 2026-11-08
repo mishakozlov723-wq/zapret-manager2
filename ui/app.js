@@ -403,7 +403,7 @@ async function checkApp(silent = false) {
   try {
     A.info = await invoke('check_app_update'); A.state = A.info.available ? 'available' : 'latest';
     if (silent && A.info.available) toast(`Вышла новая версия программы ${A.info.latest}.`, 'info', { label: 'Обновить', fn: () => go('about') });
-  } catch (e) { A.state = 'idle'; if (!silent) { A.err = errText(e); if (isCool(e)) startCool('app', e); } }
+  } catch (e) { A.state = 'idle'; if (!silent) { A.err = errText(e); if (isCool(e)) startCool('app', { ...e, wait: Math.min(e.wait, 10) }); } }
   renderAbout();
 }
 async function downloadApp() {

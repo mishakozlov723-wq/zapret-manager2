@@ -72,10 +72,34 @@ pub fn read_update(json: &serde_json::Value, current: &str) -> Result<AppUpdate,
     Ok(up)
 }
 
+// latest.json is a normal release file, so checking does not use GitHub's 60-requests-per-hour API limit.
+pub fn manifest_to_release(m: &serde_json::Value) -> serde_json::Value {
+    let tag = m["tag"].as_str().unwrap_or("");
+    serde_json::json!({
+        "tag_name": tag,
+        "body": m["notes"],
+        "assets": [{
+            "name": ASSET,
+            "state": "uploaded",
+            "size": m["size"],
+            "digest": format!("sha256:{}", m["sha256"].as_str().unwrap_or("")),
+            "browser_download_url": format!("https://github.com/{}/releases/download/{}/{}", REPO, tag, ASSET),
+        }]
+    })
+}
+
 fn fetch() -> Result<AppUpdate, NetError> {
     let agent = super::https_agent(Duration::from_secs(30))?;
-    let json = net::get_json(&agent, &format!("https://api.github.com/repos/{}/releases/latest", REPO))?;
-    read_update(&json, env!("CARGO_PKG_VERSION"))
+    let current = env!("CARGO_PKG_VERSION");
+    match net::get_json(&agent, &format!("https://github.com/{}/releases/latest/download/latest.json", REPO)) {
+        Ok(m) => read_update(&manifest_to_release(&m), current),
+        // Older releases have no latest.json: ask the API once.
+        Err(e) if e.kind == "fatal" => {
+            let json = net::get_json(&agent, &format!("https://api.github.com/repos/{}/releases/latest", REPO))?;
+            read_update(&json, current)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn download() -> Result<String, NetError> {
@@ -166,5 +190,16 @@ mod tests {
         assert!(read_update(&bad, "0.3.0").is_err());
         let same = read_update(&serde_json::json!({"tag_name": "v0.3.0", "assets": []}), "0.3.0").unwrap();
         assert!(!same.available);
+    }
+    #[test] fn reads_latest_json() {
+        let m = serde_json::json!({"tag": "v9.9.9", "size": 1234, "sha256": "B".repeat(64), "notes": "hi"});
+        let up = read_update(&manifest_to_release(&m), "0.3.3").unwrap();
+        assert!(up.available);
+        assert_eq!(up.size, 1234);
+        assert_eq!(up.digest, "b".repeat(64));
+        assert_eq!(up.latest, "9.9.9");
+        let old = read_update(&manifest_to_release(&serde_json::json!({"tag": "v0.3.3"})), "0.3.3").unwrap();
+        assert!(!old.available);
+        assert!(read_update(&manifest_to_release(&serde_json::json!({"tag": "v9.9.9", "size": 5})), "0.3.3").is_err());
     }
 }

@@ -89,7 +89,12 @@ jobs:
           $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           gh release view "v$v" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create "v$v" dist/Zapret-Manager-Setup.exe --title "Zapret Manager $v" --notes-file RELEASE_NOTES.md --latest --target $env:GITHUB_SHA
+            $setup = Get-Item dist/Zapret-Manager-Setup.exe
+            $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $notes = Get-Content RELEASE_NOTES.md -Raw
+            [ordered]@{ tag = "v$v"; size = $setup.Length; sha256 = $hash; notes = $notes } | ConvertTo-Json | Set-Content latest.json -Encoding utf8NoBOM
+            Get-Content latest.json
+            gh release create "v$v" dist/Zapret-Manager-Setup.exe latest.json --title "Zapret Manager $v" --notes-file RELEASE_NOTES.md --latest --target $env:GITHUB_SHA
             exit $LASTEXITCODE
           }
           # Same version again: only a test build, it never reaches users.

@@ -1,6 +1,6 @@
 [package]
 name = "zapret-manager"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "An independent interface for zapret-discord-youtube"
 [build-dependencies]

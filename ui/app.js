@@ -57,6 +57,14 @@ function parseName(name) {
 const GROUPS = ['Основные', 'ALT', 'Simple Fake', 'Fake TLS'];
 const APP_NAMES = { redshieldvpn: 'RedShield VPN', adguardsvc: 'AdGuard', adguard: 'AdGuard', goodbyedpi: 'GoodbyeDPI', 'warp-svc': 'Cloudflare WARP' };
 const appName = n => APP_NAMES[String(n).toLowerCase()] || n;
+// Warnings the user chose to hide (per app name); a new app shows the warning again.
+const HIDE_KEY = 'zapret-manager-hidden-apps-v1';
+const hiddenApps = () => { try { const v = JSON.parse(localStorage.getItem(HIDE_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+function hideApps(list) {
+  const all = [...new Set([...hiddenApps(), ...list.map(a => String(a).toLowerCase())])];
+  try { localStorage.setItem(HIDE_KEY, JSON.stringify(all)); } catch {}
+  S.lastKey = ''; render(); toast('Скрыто. Покажем снова, если появится другая программа.', 'ok');
+}
 
 function derive(ov) {
   const legacyActive = ov.legacy.present && (ov.legacy.running || ov.legacy.automatic);
@@ -190,13 +198,14 @@ function renderHome() {
   if (action) { act.textContent = action.label; act.onclick = action.fn; }
 
   const alerts = $('alerts'), fresh = document.createDocumentFragment();
-  const alert = (tone, t, p) => fresh.append(h('div', { class: 'alert', 'data-tone': tone }, icon(tone === 'info' ? 'info' : 'triangle-alert'), h('div', {}, h('b', { text: t }), h('p', { text: p }))));
+  const alert = (tone, t, p, act) => fresh.append(h('div', { class: 'alert', 'data-tone': tone }, icon(tone === 'info' ? 'info' : 'triangle-alert'), h('div', {}, h('b', { text: t }), h('p', { text: p })), act ? h('button', { type: 'button', class: 'ghost alert-act', onclick: act.fn }, act.label) : null));
   if (S.ov) {
     const ov = S.ov;
     const dnsBad = [['YouTube', ov.dns.youtube], ['Discord', ov.dns.discord]].filter(([, v]) => v && v !== 'ok').map(([n]) => n);
     if (dnsBad.length) alert('bad', `DNS блокирует ${dnsBad.join(' и ')}`, 'Провайдер подменяет ответы DNS, и компьютер не может узнать адрес сайта. Zapret это не лечит, поэтому стратегии не помогали. Включите зашифрованный DNS: Параметры Windows → Сеть и Интернет → Ethernet (или Wi-Fi → свойства вашей сети) → Назначение DNS-сервера → Изменить → Вручную → IPv4 → предпочитаемый DNS 1.1.1.1, шифрование «Только зашифрованный (DNS через HTTPS)». Или «Безопасный DNS» в браузере (тогда это предупреждение здесь останется, это нормально).');
     if (ov.services.length) alert('bad', `Найден другой обход: ${ov.services.join(', ')}`, 'Он занимает тот же драйвер WinDivert и ломает Zapret. Удалите его или остановите службу.');
-    if (ov.apps.length) alert('warn', `Может мешать: ${ov.apps.map(appName).join(', ')}`, 'VPN и другие обходчики перехватывают тот же трафик. Полностью закройте их, пока работает Zapret.');
+    const hiddenNow = hiddenApps(), apps = ov.apps.filter(a => !hiddenNow.includes(String(a).toLowerCase()));
+    if (apps.length) alert('warn', `Может мешать: ${apps.map(appName).join(', ')}`, 'Включён VPN или похожая программа, она перехватывает тот же трафик. Если Zapret не работает — выключите её. Если всё работает, предупреждение можно скрыть.', { label: 'Скрыть', fn: () => hideApps(apps) });
     if (ov.proxy) alert('warn', 'Включён системный прокси', 'Если вы им не пользуетесь, выключите: Параметры → Сеть и Интернет → Прокси.');
     if (ov.timestamps === false) alert('info', 'TCP timestamps выключены', 'Включим автоматически при подключении стратегии.');
   }
@@ -251,16 +260,18 @@ function renderStrategies() {
   $('sb-detail').textContent = connecting ? `${base(S.busy.slice(8))} · подтвердите запрос Windows` : autoBusy ? `${base(m.strategy)} · ${S.autoTarget ? 'включаем' : 'выключаем'} автозапуск…` : d.connected ? `${base(m.strategy)} · Zapret ${d.downloaded}${m.automatic ? ' · запускается с Windows' : ''}` : `Zapret ${d.downloaded} · выберите стратегию ниже`;
   // Autostart: the switch moves right away, a spinner sits in the knob while Windows applies it,
   // then the knob pops (success) or the switch shakes back (error).
-  const auto = $('autostart'), sw = $('autostart-switch'), canAuto = !!(m.present && m.owned);
-  const autoOn = autoBusy && S.autoTarget != null ? S.autoTarget : !!m.automatic;
+  // Disconnected: the switch shows the remembered choice, applied on the next connect.
+  const pref = S.ov.autostart ?? !!m.automatic;
+  const auto = $('autostart'), sw = $('autostart-switch'), canAuto = !!d.downloaded;
+  const autoOn = autoBusy && S.autoTarget != null ? S.autoTarget : d.connected ? !!m.automatic : !!pref;
   auto.checked = autoOn; auto.disabled = !canAuto || !!S.busy;
   sw.classList.toggle('pending', autoBusy); sw.classList.toggle('on', autoOn && !autoBusy);
   sw.setAttribute('aria-busy', String(autoBusy));
   $('autostart-label').textContent = autoBusy ? (S.autoTarget ? 'Включаем…' : 'Выключаем…') : 'Запуск с Windows';
-  sw.title = !canAuto ? 'Сначала подключите стратегию' : autoOn ? 'Стратегия включится сама после перезагрузки' : 'Включать эту стратегию при старте Windows';
+  sw.title = !canAuto ? 'Сначала скачайте Zapret' : d.connected ? (autoOn ? 'Стратегия включится сама после перезагрузки' : 'Включать эту стратегию при старте Windows') : (autoOn ? 'Запомнено: после подключения стратегия будет запускаться с Windows' : 'Включать стратегию при старте Windows (после подключения)');
   if (!autoBusy && S.autoTarget != null) {
-    const ok = !!m.automatic === S.autoTarget; S.autoTarget = null;
-    flash(sw, ok ? (m.automatic ? 'pop-on' : 'pop-off') : 'shake', 900);
+    const now = d.connected ? !!m.automatic : !!S.ov.autostart, ok = now === S.autoTarget; S.autoTarget = null;
+    flash(sw, ok ? (now ? 'pop-on' : 'pop-off') : 'shake', 900);
   }
   const dis = $('disconnect'); dis.disabled = !d.connected || !!S.busy;
 
@@ -304,7 +315,8 @@ $('disconnect').addEventListener('click', disconnect);
 $('autostart').addEventListener('change', e => {
   const on = e.target.checked;
   S.autoTarget = on;
-  run('auto', async () => { await invoke('strategy_action', { action: on ? 'auto_on' : 'auto_off', name: null }); toast(on ? 'Стратегия будет запускаться вместе с Windows.' : 'Автозапуск выключен.', 'ok'); }, true);
+  const live = !!(S.ov && derive(S.ov).connected);
+  run('auto', async () => { await invoke('strategy_action', { action: on ? 'auto_on' : 'auto_off', name: null }); if (S.ov) S.ov.autostart = on; toast(on ? (live ? 'Стратегия будет запускаться вместе с Windows.' : 'Запомнили: после подключения стратегия будет запускаться с Windows.') : 'Автозапуск выключен.', 'ok'); }, true);
 });
 
 function renderSide() {

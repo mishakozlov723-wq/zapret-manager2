@@ -53,8 +53,17 @@ public static class ZapretServiceNative {
     }
     $version = Join-Path $base $p.sha
     $ready = Join-Path $version '.ready'
-    if (Test-Path $version) { if (-not (Test-Path $ready)) { exit 13 } }
-    else {
+    $copy = Join-Path $version $p.root
+    $whole = (Test-Path $ready) -and (Test-Path (Join-Path $copy 'bin\winws.exe')) -and (Test-Path (Join-Path $copy 'service.bat'))
+    if ((Test-Path $version) -and -not $whole) {
+      # Broken copy: unpacking was interrupted or an antivirus removed winws.exe. Unpack it again from scratch.
+      $img = if ($existing) { [string]$props.ImagePath } else { '' }
+      if ($img -and $img.StartsWith('"' + $version + '\', [StringComparison]::OrdinalIgnoreCase) -and (Get-Service -Name $serviceName).Status -ne 'Stopped') {
+        Stop-Service -Name $serviceName -Force; (Get-Service -Name $serviceName).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))
+      }
+      try { Remove-Item -LiteralPath $version -Recurse -Force -ErrorAction Stop } catch { exit 16 }
+    }
+    if (-not (Test-Path $version)) {
       New-Item -ItemType Directory -Path $version | Out-Null
       $archive = Join-Path $version 'official.zip'
       Copy-Item -LiteralPath $p.source -Destination $archive
@@ -63,9 +72,9 @@ public static class ZapretServiceNative {
       try {$actual=([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-','').ToLowerInvariant()} finally {$stream.Dispose();$hasher.Dispose()}
       if ($actual -ne $p.sha) { exit 13 }
       [Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem') | Out-Null
-      [IO.Compression.ZipFile]::ExtractToDirectory($archive,$version)
+      try { [IO.Compression.ZipFile]::ExtractToDirectory($archive,$version) } catch { exit 16 }
       $folder = Join-Path $version $p.root
-      if (-not (Test-Path (Join-Path $folder 'bin\winws.exe')) -or -not (Test-Path (Join-Path $folder 'service.bat'))) { exit 13 }
+      if (-not (Test-Path (Join-Path $folder 'bin\winws.exe')) -or -not (Test-Path (Join-Path $folder 'service.bat'))) { exit 16 }
       $lists=Join-Path $folder 'lists'
       foreach ($entry in @(@('ipset-exclude-user.txt','203.0.113.113/32'),@('list-general-user.txt',"# Never leave this file empty`r`ndomain.example.abc"),@('list-exclude-user.txt','domain.example.abc'))) {
         $file=Join-Path $lists $entry[0]; if (-not (Test-Path $file)) { [IO.File]::WriteAllText($file,$entry[1]+"`r`n") }
@@ -74,7 +83,7 @@ public static class ZapretServiceNative {
     }
     $folder=Join-Path $version $p.root
     $exe=Join-Path $folder 'bin\winws.exe'
-    if (-not (Test-Path $exe)) { exit 13 }
+    if (-not (Test-Path $exe)) { exit 16 }
     # User's own sites go to list-general-user.txt (read by every general*.bat next to the stock list-general.txt).
     # Rewritten on every connect, so a fresh release keeps its new stock list and gets the user's additions on top.
     $userDomains = @($p.domains | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' })
@@ -87,7 +96,8 @@ public static class ZapretServiceNative {
     if ($existing) {
       $oldPath=$props.ImagePath; $oldMode=[int]$props.Start; $wasRunning=((Get-Service -Name $serviceName).Status -eq 'Running')
       if ($wasRunning) {Stop-Service -Name $serviceName; (Get-Service -Name $serviceName).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))}
-      $mode=if($oldMode -eq 2){2}else{3}
+      # The user's remembered autostart choice wins; without one keep what the service had.
+      $mode=if($null -ne $p.auto){if($p.auto){2}else{3}}elseif($oldMode -eq 2){2}else{3}
       try { [ZapretServiceNative]::Change($serviceName,$binary,$mode) }
       catch { if ($env:ZAPRET_SERVICE_TEST -eq '1') {[Console]::Error.WriteLine('ChangeService error: '+$_.Exception.ToString())}; if ($wasRunning) {Start-Service -Name $serviceName -ErrorAction SilentlyContinue}; exit 14 }
     } else {
@@ -100,6 +110,7 @@ public static class ZapretServiceNative {
       Start-Sleep -Seconds 3
       if ((Get-Service -Name $serviceName).Status -ne 'Running') {throw 'Service stopped immediately after startup'}
       New-ItemProperty -LiteralPath $key -Name ZapretManagerStrategy -PropertyType String -Value $p.strategy -Force | Out-Null
+      if (-not $existing -and $p.auto -eq $true) { Set-Service -Name $serviceName -StartupType Automatic }
     } catch {
       if ($env:ZAPRET_SERVICE_TEST -eq '1') {
         [Console]::Error.WriteLine("Start error: " + $_.Exception.ToString())
@@ -119,6 +130,15 @@ public static class ZapretServiceNative {
     if ($legacySvc -and $legacySvc.State -ne 'Stopped') { exit 10 }
     $keep = if ($existing) { [int]$existing.ProcessId } else { 0 }
     Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | Where-Object { [int]$_.ProcessId -ne $keep } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  } elseif ($p.action -eq 'cleanup') {
+    # Delete unpacked old versions chosen by the user. Never the folder the service runs from.
+    $inUse = if ($existing) { [string]$props.ImagePath } else { '' }
+    foreach ($sha in @($p.remove)) {
+      if ([string]$sha -notmatch '^[a-f0-9]{64}$') { exit 13 }
+      if ($inUse -and $inUse.IndexOf('\' + $sha + '\', [StringComparison]::OrdinalIgnoreCase) -ge 0) { continue }
+      $dir = Join-Path $base $sha
+      if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    }
   } elseif (-not $existing) {exit 15}
   elseif ($p.action -eq 'disconnect') {
     Set-Service -Name $serviceName -StartupType Manual

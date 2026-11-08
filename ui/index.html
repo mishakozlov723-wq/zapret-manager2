@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="icons.css">
 <script defer src="app.js"></script>
 <script defer src="settings.js"></script>
+<script defer src="versions.js"></script>
 </head>
 <body>
 <div class="layout">
@@ -25,7 +26,7 @@
     <div class="sidestatus" id="side-status" data-tone="idle" role="status" aria-live="polite">
       <i aria-hidden="true"></i><div><b id="side-title">Проверяем…</b><small id="side-detail"></small></div>
     </div>
-    <div class="sidefoot">Версия <b id="app-version">0.3.5</b></div>
+    <div class="sidefoot">Версия <b id="app-version">0.3.6</b></div>
   </aside>
 
   <main>
@@ -83,6 +84,10 @@
       </div>
       <p class="hint" id="release-detail"></p>
       <div id="versions-cool"></div>
+      <div class="group-title">Место на диске</div>
+      <div class="panel rows">
+        <div class="row"><span>Старые версии</span><b id="old-summary">—</b><button class="ghost" id="old-open" type="button"><span data-icon="trash-2" aria-hidden="true"></span>Удалить старые версии</button></div>
+      </div>
     </section>
 
     <section class="page" id="settings" hidden>
@@ -110,13 +115,22 @@
     <section class="page" id="about" hidden>
       <header><div><h1>О программе</h1><p>Независимый менеджер для Zapret.</p></div></header>
       <div class="panel about">
-        <b id="about-version">Zapret Manager 0.3.5</b>
+        <b id="about-version">Zapret Manager 0.3.6</b>
         <p>Основан на zapret-discord-youtube от Flowseal и Zapret от bol-van. Не является официальным приложением Flowseal.</p>
         <p>Исходный проект: github.com/Flowseal/zapret-discord-youtube</p>
       </div>
       <div class="panel upd" id="app-update" aria-live="polite"></div>
     </section>
   </main>
+</div>
+<div class="modal-back" id="cleaner" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cleaner-title">
+    <div class="modal-head"><b id="cleaner-title">Старые версии Zapret</b><button class="toast-close" id="cleaner-close" type="button" aria-label="Закрыть"></button></div>
+    <p class="hint">Отметьте версии, которые больше не нужны. Текущую версию удалить нельзя. Для копий службы Windows попросит подтверждение администратора.</p>
+    <div class="dirlist vlist" id="cleaner-list"></div>
+    <p class="form-error" id="cleaner-error" role="alert"></p>
+    <div class="row-actions"><button class="primary danger" id="cleaner-ok" type="button" disabled>Удалить</button><button class="ghost" id="cleaner-all" type="button">Выбрать все</button><button class="ghost" id="cleaner-cancel" type="button">Отмена</button></div>
+  </div>
 </div>
 <div class="modal-back" id="picker" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="picker-title">

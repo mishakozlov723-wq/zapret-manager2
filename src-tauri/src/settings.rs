@@ -15,6 +15,8 @@ pub struct Settings {
     pub domains: Vec<String>,
     /// Domains written into the running service's list on the last successful connect.
     pub applied: Option<Vec<String>>,
+    /// Start with Windows: the user's choice, kept while disconnected and applied on connect.
+    pub autostart: Option<bool>,
 }
 
 fn data_dir() -> Result<PathBuf, String> {

@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Zapret-Manager-Setup</AssemblyName>
-    <Version>0.3.5</Version>
+    <Version>0.3.6</Version>
     <ApplicationIcon>../src-tauri/icons/icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

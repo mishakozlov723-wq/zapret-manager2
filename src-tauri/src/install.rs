@@ -58,6 +58,7 @@ fn existing_release(base: &Path, tag: &str, digest: &str) -> Option<Installed> {
         let dirs: Vec<_> = items.flatten().filter(|x| x.path().is_dir()).collect();
         let root = if files.join("service.bat").is_file() { files.clone() } else if dirs.len() == 1 { dirs[0].path() } else { continue };
         if root.join("service.bat").is_file() && root.join("bin").join("winws.exe").is_file() {
+            let _ = fs::write(entry.path().join("release.sha256"), digest);
             return Some(Installed { tag: tag.to_owned(), folder: root.display().to_string(), reused: true });
         }
     }
@@ -113,6 +114,8 @@ fn download_install(base: &Path) -> Result<Installed, NetError> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis();
     let dir=base.join(format!("{tag}-{stamp}")); fs::create_dir(&dir).map_err(|e|format!("Не удалось создать папку: {e}"))?;
     let zip_path=dir.join("release.zip"); let mut file=File::create(zip_path).map_err(|e|e.to_string())?; file.write_all(&bytes).map_err(|e|e.to_string())?;
+    // Checked hash, so connecting later does not have to ask GitHub again.
+    fs::write(dir.join("release.sha256"), digest).map_err(|e|e.to_string())?;
     let content=dir.join("files");fs::create_dir(&content).map_err(|e|e.to_string())?;
     let root=unpack(&bytes, &content)?;
     Ok(Installed { tag:tag.to_owned(), folder:root.display().to_string(), reused:false })

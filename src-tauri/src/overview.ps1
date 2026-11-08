@@ -39,8 +39,11 @@ $svc = @()
 foreach ($n in @('GoodbyeDPI','discordfix_zapret','winws1','winws2')) { if (Get-Service -Name $n) { $svc += $n } }
 $r.services = $svc
 
-$procs = @(Get-Process | Where-Object { $_.ProcessName -match '(?i)(vpn|adguard|goodbyedpi|warp-svc|hiddify|nekoray|v2ray|xray|sing-box|outline|amnezia|happ)' } | ForEach-Object { $_.ProcessName } | Sort-Object -Unique)
-$r.apps = $procs
+# A VPN only matters while it is really on (an active tunnel adapter); an app just sitting in the tray is fine.
+$vpn = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' -and (($_.InterfaceDescription + ' ' + $_.Name) -match '(?i)(wintun|wireguard|tap-windows|openvpn|\btun\b|vpn|amnezia|outline|sing-?box|hiddify|happ|nekoray|xray|v2ray|clash|mihomo|warp)') } | ForEach-Object { [string]$_.Name })
+# These intercept traffic whenever they run.
+$always = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '(?i)^(goodbyedpi|adguardsvc)$' } | ForEach-Object { $_.ProcessName })
+$r.apps = @(@($vpn) + @($always) | Sort-Object -Unique)
 
 $ts = (netsh interface tcp show global) -join "`n"
 $r.timestamps = if ($ts -match '(?im)1323[^:\r\n]*:\s*(\w+)') { $Matches[1] -eq 'enabled' } else { $null }

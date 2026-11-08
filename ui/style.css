@@ -288,3 +288,16 @@ body[data-busy="auto"] button:disabled{opacity:.75}
 .nav{position:relative}
 .nav.has-update::after{content:'';position:absolute;right:10px;top:50%;width:7px;height:7px;margin-top:-3.5px;border-radius:50%;background:var(--ok);animation:updDot 2s ease-in-out infinite}
 @keyframes updDot{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}50%{box-shadow:0 0 0 5px transparent}}
+/* hide button on a warning, old versions list */
+.alert .alert-act{margin-left:auto;align-self:center;flex:none}
+.primary.danger{background:var(--bad);color:#fff}
+.primary.danger:hover{background:color-mix(in srgb,var(--bad) 85%,#fff)}
+.primary:disabled,.primary.danger:disabled{opacity:.45;cursor:default}
+.vrow{display:flex;align-items:center;gap:12px;padding:9px 12px;cursor:pointer}
+.vrow+.vrow{border-top:1px solid var(--ln)}
+.vrow:hover{background:var(--hv)}
+.vrow.used{cursor:default;opacity:.7}
+.vrow.used:hover{background:none}
+.vrow input{width:16px;height:16px;flex:none;margin:0;accent-color:var(--bad);cursor:inherit}
+.vname{display:flex;flex-direction:column;min-width:0;flex:1}
+.vname small{color:var(--tx3);font-size:12px}

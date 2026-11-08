@@ -4,6 +4,7 @@ mod net;
 mod update;
 mod control;
 mod settings;
+mod versions;
 use serde::Serialize;
 use std::time::Duration;
 use std::sync::Arc;
@@ -100,4 +101,4 @@ mod tests {
     }
 }
 mod window_chrome;
-fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, update::app_version, update::check_app_update, update::app_update_progress, update::download_app_update, update::launch_app_update, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains]).run(tauri::generate_context!()).expect("failed to run app"); }
+fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, update::app_version, update::check_app_update, update::app_update_progress, update::download_app_update, update::launch_app_update, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains, versions::list_versions, versions::delete_versions]).run(tauri::generate_context!()).expect("failed to run app"); }

@@ -5,7 +5,7 @@ use std::{fs,io::{Read,Cursor},path::{Path,PathBuf},time::Duration};
 #[derive(Serialize)]
 pub struct StrategyList { version:String, strategies:Vec<String> }
 fn versions_path()->Result<PathBuf,String> {super::settings::downloads_dir()}
-fn latest_archive(base:&Path)->Result<(PathBuf,String),String> {
+pub(crate) fn latest_archive(base:&Path)->Result<(PathBuf,String),String> {
  let mut found=Vec::new();
  for entry in fs::read_dir(base).map_err(|_|"Сначала скачай свежий Zapret на главной странице".to_string())? {
   let e=entry.map_err(|e|e.to_string())?; if !e.file_type().map_err(|e|e.to_string())?.is_dir(){continue}
@@ -43,15 +43,26 @@ fn strategy_arguments(data:&[u8],root:&str,name:&str,dest:&Path)->Result<String,
 #[tauri::command]
 pub async fn strategies()->Result<StrategyList,String>{tauri::async_runtime::spawn_blocking(||{let (_,tag,data)=load_archive()?;let (_,names)=archive_scripts(&data)?;Ok(StrategyList{version:tag,strategies:names})}).await.map_err(|e|e.to_string())?}
 #[cfg(windows)]
-fn official_hash(tag:&str,data:&[u8])->Result<String,String>{
- let mut url=url::Url::parse("https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/tags/").unwrap();url.path_segments_mut().map_err(|_|"URL")?.pop_if_empty().push(tag);
- let json:serde_json::Value=super::https_agent(Duration::from_secs(20))?.get(url.as_str()).set("User-Agent","Retocker-Zapret-Manager").call().map_err(|e|format!("Не удалось проверить релиз на GitHub: {e}"))?.into_json().map_err(|e|e.to_string())?;
- let asset=json["assets"].as_array().ok_or("Нет файлов релиза")?.iter().find(|a|a["name"].as_str().map_or(false,|n|n.starts_with("zapret-discord-youtube-")&&n.ends_with(".zip"))&&a["state"]=="uploaded").ok_or("Нет ZIP релиза")?;
- let hash=asset["digest"].as_str().and_then(|d|d.strip_prefix("sha256:")).ok_or("Нет SHA-256 релиза")?.to_ascii_lowercase();
- if hash.len()!=64||format!("{:x}",Sha256::digest(data))!=hash{return Err("Архив не совпадает с официальным релизом".into())}Ok(hash)
+fn official_hash(zip:&Path,tag:&str,data:&[u8])->Result<String,String>{
+ // The SHA-256 saved at download time (checked against GitHub back then): connecting needs no network at all.
+ let actual=format!("{:x}",Sha256::digest(data));
+ let mark=zip.with_file_name("release.sha256");
+ if let Ok(saved)=fs::read_to_string(&mark){
+  if saved.trim().eq_ignore_ascii_case(&actual){return Ok(actual)}
+  return Err("Скачанный архив Zapret повреждён. Скачайте его заново на главной.".into());
+ }
+ // Downloaded by an older app version: check once on the normal release page (no API limit), then remember.
+ let agent=super::https_agent(Duration::from_secs(20))?;
+ let page=format!("https://github.com/Flowseal/zapret-discord-youtube/releases/expanded_assets/{tag}");
+ let html=super::net::get_text(&agent,&page).map_err(|e|format!("Не удалось проверить архив на GitHub: {}",e.message))?;
+ let href=format!("/releases/download/{tag}/zapret-discord-youtube-{tag}.zip\"");
+ let hash=super::net::digest_after(&html,&href).ok_or("Не удалось проверить архив на GitHub. Скачайте Zapret заново на главной.")?;
+ if hash!=actual{return Err("Архив не совпадает с официальным релизом".into())}
+ let _=fs::write(&mark,&actual);
+ Ok(actual)
 }
 #[cfg(windows)]
-fn powershell(script:&str,elevated:bool)->Result<String,String>{
+pub(crate) fn powershell(script:&str,elevated:bool)->Result<String,String>{
  use base64::{engine::general_purpose::STANDARD,Engine as _};use std::{process::Command,os::windows::process::CommandExt};
  let encode=|s:&str|STANDARD.encode(s.encode_utf16().flat_map(|v|v.to_le_bytes()).collect::<Vec<u8>>());
  let mut gz=flate2::write::GzEncoder::new(Vec::new(),flate2::Compression::default());
@@ -67,26 +78,55 @@ fn powershell(script:&str,elevated:bool)->Result<String,String>{
  let result=cmd.creation_flags(0x08000000).output().map_err(|e|e.to_string())?;
  if result.status.success(){return Ok(String::from_utf8_lossy(&result.stdout).trim().to_string())}
  if std::env::var("ZAPRET_SERVICE_TEST").as_deref()==Ok("1") { eprintln!("PowerShell status {:?}; stderr: {}; stdout: {}",result.status.code(),String::from_utf8_lossy(&result.stderr),String::from_utf8_lossy(&result.stdout)); }
- Err(match result.status.code(){Some(10)=>"Старый Zapret ещё запущен или включён его автозапуск. Сначала отключи старую службу на главной.",Some(11)=>"Обнаружен другой работающий winws. Останови его вручную, затем повтори.",Some(12)=>"Найдена чужая служба с именем менеджера. Ничего не изменено.",Some(13)=>"Ошибка проверки официального архива или защищённой папки.",Some(14)=>"Служба не запустилась. Проверь, не мешают ли другие программы или антивирус.",Some(15)=>"Сначала выбери стратегию и подключи её.",Some(90)=>"Подтверждение администратора отменено или не получено.",_=>"Windows не смогла выполнить операцию. Проверь состояние службы."}.into())
+ Err(match result.status.code(){Some(10)=>"Старый Zapret ещё запущен или включён его автозапуск. Сначала отключи старую службу на главной.",Some(11)=>"Обнаружен другой работающий winws. Останови его вручную, затем повтори.",Some(12)=>"Найдена чужая служба с именем менеджера. Ничего не изменено.",Some(13)=>"Ошибка проверки официального архива или защищённой папки.",Some(14)=>"Служба не запустилась. Проверь, не мешают ли другие программы или антивирус.",Some(15)=>"Сначала выбери стратегию и подключи её.",Some(16)=>"Антивирус удалил или заблокировал файлы Zapret (winws.exe). Добавьте папку службы из Настроек в исключения антивируса и нажмите «Подключить» ещё раз.",Some(90)=>"Подтверждение администратора отменено или не получено.",_=>"Windows не смогла выполнить операцию. Проверь состояние службы."}.into())
 }
 #[cfg(windows)]
 fn run_action(action:&str,name:Option<String>)->Result<String,String>{
  use base64::{engine::general_purpose::STANDARD,Engine as _};
  let mut payload=serde_json::json!({"action":action});
  let mut domains:Vec<String>=Vec::new();
+ if action=="auto_on"||action=="auto_off" {
+  // Not connected: only remember the choice, it is applied on the next connect (no admin prompt).
+  let (running,_)=service_state()?;
+  if !running {let mut s=super::settings::load();s.autostart=Some(action=="auto_on");super::settings::save(&s)?;return Ok("Готово".into())}
+ }
+ if action=="disconnect" {
+  // Remember the current autostart choice once (settings from older versions do not have it).
+  let mut s=super::settings::load();
+  if s.autostart.is_none(){if let Ok((_,auto))=service_state(){s.autostart=Some(auto);let _=super::settings::save(&s);}}
+ }
  if action=="connect" {
-  let (zip,tag,data)=load_archive()?;let hash=official_hash(&tag,&data)?;let (root,names)=archive_scripts(&data)?;let name=name.ok_or("Выбери стратегию")?;if !names.contains(&name){return Err("Стратегия не найдена".into())}
+  let (zip,tag,data)=load_archive()?;let hash=official_hash(&zip,&tag,&data)?;let (root,names)=archive_scripts(&data)?;let name=name.ok_or("Выбери стратегию")?;if !names.contains(&name){return Err("Стратегия не найдена".into())}
   let s=super::settings::load();domains=super::settings::clean_domains(&s.domains)?;
   let base=super::settings::install_base()?;let dest=base.join(&hash).join(&root);let args=strategy_arguments(&data,&root,&name,&dest)?;
   // Default base is handled inside the script; only a custom folder is passed (and re-validated there).
   let custom=s.install.as_ref().map(|_|base.to_string_lossy().to_string());
-  payload=serde_json::json!({"action":action,"source":zip.to_string_lossy(),"sha":hash,"root":root,"strategy":name,"args":args,"base":custom,"domains":domains});
+  payload=serde_json::json!({"action":action,"source":zip.to_string_lossy(),"sha":hash,"root":root,"strategy":name,"args":args,"base":custom,"domains":domains,"auto":s.autostart});
  }
  let payload=STANDARD.encode(serde_json::to_vec(&payload).map_err(|e|e.to_string())?);
  let script=include_str!("control.ps1").replace("__PAYLOAD__",&payload);
  powershell(&script,true)?;
  if action=="connect" {super::settings::mark_applied(&domains);}
+ if action=="auto_on"||action=="auto_off" {let mut s=super::settings::load();s.autostart=Some(action=="auto_on");let _=super::settings::save(&s);}
  Ok("Готово".into())
+}
+/// (running, automatic) of our service, read without admin rights.
+#[cfg(windows)]
+fn service_state()->Result<(bool,bool),String>{
+ let script=r#"$s=Get-Service -Name ZapretManagerWinws -ErrorAction SilentlyContinue;$p=Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\ZapretManagerWinws' -ErrorAction SilentlyContinue;$a=[int][bool]($s -and $s.Status -eq 'Running');$b=[int][bool]($p -and $p.Start -eq 2);"$a$b""#;
+ let text=powershell(script,false)?;let b=text.as_bytes();
+ Ok((b.first()==Some(&b'1'),b.get(1)==Some(&b'1')))
+}
+/// Delete unpacked old versions (they live in an admin-only folder, so one UAC prompt).
+#[cfg(windows)]
+pub(crate) fn cleanup(shas:&[String])->Result<(),String>{
+ use base64::{engine::general_purpose::STANDARD,Engine as _};
+ let s=super::settings::load();let base=super::settings::install_base()?;
+ let custom=s.install.as_ref().map(|_|base.to_string_lossy().to_string());
+ let payload=serde_json::json!({"action":"cleanup","remove":shas,"base":custom});
+ let payload=STANDARD.encode(serde_json::to_vec(&payload).map_err(|e|e.to_string())?);
+ powershell(&include_str!("control.ps1").replace("__PAYLOAD__",&payload),true)?;
+ Ok(())
 }
 #[tauri::command]
 pub async fn strategy_action(action:String,name:Option<String>)->Result<String,String>{
@@ -127,6 +167,7 @@ pub async fn overview()->Result<serde_json::Value,String>{tauri::async_runtime::
   let mut value:serde_json::Value=serde_json::from_str(&text).map_err(|e|format!("Не удалось прочитать состояние: {e}"))?;
   let obj=value.as_object_mut().ok_or("Неверный ответ проверки")?;
   obj.insert("downloaded".into(),match versions_path().and_then(|p|latest_archive(&p)){Ok((_,tag))=>tag.into(),Err(_)=>serde_json::Value::Null});
+  obj.insert("autostart".into(),match super::settings::load().autostart{Some(v)=>v.into(),None=>serde_json::Value::Null});
   obj.insert("dns".into(),serde_json::json!({"youtube":dns_state("www.youtube.com"),"discord":dns_state("discord.com")}));
   Ok(value)
  }
@@ -170,5 +211,18 @@ mod windows_integration {
   invoke(serde_json::json!({"action":"auto_off"})).expect("disable autostart");
   invoke(serde_json::json!({"action":"disconnect"})).expect("disconnect");
   powershell("$s=Get-CimInstance Win32_Service -Filter \"Name='ZapretManagerWinws'\"; $p=Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\ZapretManagerWinws'; if ($s.State -ne 'Stopped' -or $p.Start -ne 3) {exit 1}",false).expect("stopped and manual");
+ }
+}
+
+#[cfg(all(test,windows))]
+mod stored_hash_tests {
+ use super::*;
+ #[test] fn connect_uses_saved_hash_without_network(){
+  let dir=std::env::temp_dir().join(format!("zm-hash-{}",std::process::id()));let _=fs::remove_dir_all(&dir);fs::create_dir_all(&dir).unwrap();
+  let zip=dir.join("release.zip");fs::write(&zip,b"zip").unwrap();
+  let sha=format!("{:x}",Sha256::digest(b"zip"));fs::write(dir.join("release.sha256"),&sha).unwrap();
+  assert_eq!(official_hash(&zip,"0.0.0-test",b"zip").unwrap(),sha);
+  assert!(official_hash(&zip,"0.0.0-test",b"other").is_err());
+  let _=fs::remove_dir_all(&dir);
  }
 }

@@ -28,7 +28,19 @@ jobs:
           "ZAPRET_TEST_ZIP=$env:RUNNER_TEMP\zapret-fixture.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test checks
         working-directory: src-tauri
-        run: cargo test
+        shell: bash
+        run: cargo test 2>&1 | tee cargo-test.log
+      - name: Share test log on failure
+        if: failure()
+        working-directory: src-tauri
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f cargo-test.log ] || exit 0
+          grep -v '^ *Compiling ' cargo-test.log | tail -c 60000 | base64 -w0 > log.b64
+          jq -n --rawfile c log.b64 --arg m "CI log $GITHUB_RUN_ID" '{message:$m, branch:"ci-status", content:$c}' > log.json
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/logs/$GITHUB_RUN_ID.txt" --input log.json > /dev/null
       - name: Test real service on isolated Windows runner
         working-directory: src-tauri
         shell: pwsh

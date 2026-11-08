@@ -1,0 +1,27 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m   Compiling[0m zapret-manager v0.3.2 (D:\a\zapret-manager2\zapret-manager2\src-tauri)
+[1m[91merror[E0425][0m[1m[97m: cannot find function `get_bytes_progress` in module `net`[0m
+  [1m[96m--> [0msrc\update.rs:87:22
+   [1m[96m|[0m
+[1m[96m87[0m [1m[96m|[0m     let bytes = net::get_bytes_progress(&agent, &up.url, MAX_SETUP, &|n| DONE.store(n, Ordering::Relaxed))?;
+   [1m[96m|[0m                      [1m[91m^^^^^^^^^^^^^^^^^^[0m [1m[91mnot found in `net`[0m
+
+[1m[91merror[E0061][0m[1m[97m: this function takes 3 arguments but 2 arguments were supplied[0m
+  [1m[96m--> [0msrc\update.rs:77:16
+   [1m[96m|[0m
+[1m[96m77[0m [1m[96m|[0m     let json = net::get_json(&agent, &format!("https://api.github.com/repos/{}/releases/latest", REPO))?;
+   [1m[96m|[0m                [1m[91m^^^^^^^^^^^^^[0m[1m[96m---------------------------------------------------------------------------[0m [1m[96margument #3 of type `&str` is missing[0m
+   [1m[96m|[0m
+[1m[92mnote[0m: function defined here
+  [1m[96m--> [0msrc\net.rs:62:8
+   [1m[96m|[0m
+[1m[96m62[0m [1m[96m|[0m pub fn get_json(agent: &ureq::Agent, url: &str, what: &str) -> Result<serde_json::Value, NetError> {
+   [1m[96m|[0m        [1m[92m^^^^^^^^[0m                                 [1m[96m----------[0m
+[1m[96mhelp[0m: provide the argument
+   [1m[96m|[0m
+[1m[96m77[0m [1m[96m| [0m    let json = net::get_json(&agent, &format!("https://api.github.com/repos/{}/releases/latest", REPO)[92m, /* &str */[0m)?;
+   [1m[96m|[0m                                                                                                       [92m++++++++++++[0m
+
+[1m[97mSome errors have detailed explanations: E0061, E0425.[0m
+[1m[97mFor more information about an error, try `rustc --explain E0061`.[0m
+[1m[91merror[0m: could not compile `zapret-manager` (bin "zapret-manager" test) due to 2 previous errors

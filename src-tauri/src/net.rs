@@ -1,117 +1,171 @@
-// Shared GitHub HTTP helpers: quiet retries for flaky networks, and a clear "wait N seconds" for limits.
+// Shared GitHub HTTP helpers: quiet retries for short hiccups and errors the UI can turn into a countdown.
 use serde::Serialize;
-use std::io::Read;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{io::Read, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
 
-// kind: "retry" (network/GitHub hiccup, try again after `wait`), "rate_limit" (GitHub limit, wait until reset), "fatal".
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct NetError { pub kind: String, pub wait: u64, pub message: String }
+pub const UA: &str = "Retocker-Zapret-Manager";
+/// How long the UI asks the user to wait after a network hiccup.
+pub const RETRY_WAIT: u64 = 60;
+const ATTEMPTS: u32 = 3;
+
+/// kind: "retry" — GitHub or the network briefly failed (504, timeout, reset): show a countdown;
+/// "rate_limit" — GitHub request limit, `wait` is the real time until it resets;
+/// "fatal" — a real problem (bad checksum, missing file): plain error, no timer.
+#[derive(Serialize, Debug, Clone)]
+pub struct NetError { pub kind: &'static str, pub wait: u64, pub message: String }
 
 impl NetError {
-    pub fn fatal(message: impl Into<String>) -> Self { NetError { kind: "fatal".into(), wait: 0, message: message.into() } }
-    pub fn retry(wait: u64, message: impl Into<String>) -> Self { NetError { kind: "retry".into(), wait, message: message.into() } }
-    pub fn rate_limit(wait: u64) -> Self { NetError { kind: "rate_limit".into(), wait, message: "GitHub временно ограничил запросы".into() } }
+    pub fn fatal(message: impl Into<String>) -> Self { Self { kind: "fatal", wait: 0, message: message.into() } }
+    fn retry(message: String) -> Self { Self { kind: "retry", wait: RETRY_WAIT, message } }
 }
-impl From<String> for NetError { fn from(s: String) -> Self { NetError::fatal(s) } }
-impl From<&str> for NetError { fn from(s: &str) -> Self { NetError::fatal(s) } }
-impl std::fmt::Display for NetError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.message) } }
-
-const UA: &str = "Retocker-Zapret-Manager";
-const ATTEMPTS: u32 = 3;
-pub const COOLDOWN: u64 = 60;
+impl From<String> for NetError { fn from(m: String) -> Self { Self::fatal(m) } }
+impl From<&str> for NetError { fn from(m: &str) -> Self { Self::fatal(m) } }
 
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 
-// Turn a failed request into a decision: retry quietly, wait for the limit, or stop.
-pub fn classify(err: ureq::Error) -> NetError {
+/// Seconds to wait when GitHub says "too many requests"; None when the status is not a rate limit.
+pub fn rate_limit_wait(code: u16, remaining: Option<&str>, reset: Option<&str>, retry_after: Option<&str>, now: u64) -> Option<u64> {
+    let limited = code == 429 || (code == 403 && (remaining.map(str::trim) == Some("0") || retry_after.is_some()));
+    if !limited { return None; }
+    let wait = retry_after.and_then(|v| v.trim().parse::<u64>().ok())
+        .or_else(|| reset.and_then(|v| v.trim().parse::<u64>().ok()).map(|r| r.saturating_sub(now) + 2))
+        .unwrap_or(RETRY_WAIT);
+    // Never more than a minute: after that we try again, and the install also has a route around the API limit.
+    Some(wait.clamp(5, RETRY_WAIT))
+}
+
+pub fn describe(what: &str, err: ureq::Error) -> NetError {
     match err {
         ureq::Error::Status(code, resp) => {
-            let remaining = resp.header("x-ratelimit-remaining").map(|v| v.trim().to_owned());
-            let reset = resp.header("x-ratelimit-reset").and_then(|v| v.trim().parse::<u64>().ok());
-            let after = resp.header("retry-after").and_then(|v| v.trim().parse::<u64>().ok());
-            classify_status(code, remaining.as_deref(), reset, after, now())
-        }
-        ureq::Error::Transport(t) => NetError::retry(COOLDOWN, format!("Нет связи с GitHub: {t}")),
-    }
-}
-pub fn classify_status(code: u16, remaining: Option<&str>, reset: Option<u64>, after: Option<u64>, now: u64) -> NetError {
-    if code == 429 || (code == 403 && (remaining == Some("0") || after.is_some())) {
-        let wait = after.or_else(|| reset.map(|r| r.saturating_sub(now) + 1)).unwrap_or(COOLDOWN).clamp(5, 3600);
-        return NetError::rate_limit(wait);
-    }
-    if code >= 500 || code == 408 { return NetError::retry(COOLDOWN, format!("GitHub не отвечает (HTTP {code})")); }
-    NetError::fatal(format!("GitHub вернул ошибку HTTP {code}"))
-}
-
-// A few quiet attempts (pause 2 s, then 4 s) before the user sees anything.
-pub fn retry_loop<T>(mut f: impl FnMut() -> Result<T, NetError>) -> Result<T, NetError> {
-    let mut last = NetError::fatal("Неизвестная ошибка сети");
-    for i in 0..ATTEMPTS {
-        match f() {
-            Ok(v) => return Ok(v),
-            Err(e) if e.kind == "retry" => {
-                last = e;
-                if i + 1 < ATTEMPTS { std::thread::sleep(Duration::from_secs(2u64 << i)); }
+            if let Some(wait) = rate_limit_wait(code, resp.header("x-ratelimit-remaining"), resp.header("x-ratelimit-reset"), resp.header("retry-after"), now()) {
+                return NetError { kind: "rate_limit", wait, message: format!("GitHub временно ограничил число запросов с вашего адреса ({what}). Ограничение снимется само.") };
             }
-            Err(e) => return Err(e),
+            if matches!(code, 500 | 502 | 503 | 504) { return NetError::retry(format!("GitHub не ответил вовремя ({what}, ошибка {code}). Обычно это проходит за минуту.")); }
+            if code == 404 { return NetError::fatal(format!("На GitHub не найдено: {what}.")); }
+            NetError::fatal(format!("GitHub ответил ошибкой {code} ({what})."))
         }
+        ureq::Error::Transport(t) => NetError::retry(format!("Нет связи с GitHub ({what}: {}). Обычно это проходит за минуту.", t.kind())),
     }
-    Err(last)
 }
 
-pub fn get_json(agent: &ureq::Agent, url: &str) -> Result<serde_json::Value, NetError> {
-    retry_loop(|| {
-        let r = agent.get(url).set("User-Agent", UA).set("Accept", "application/vnd.github+json").call().map_err(classify)?;
-        r.into_json::<serde_json::Value>().map_err(|e| NetError::retry(COOLDOWN, format!("Ответ GitHub оборвался: {e}")))
+/// Runs `op` up to 3 times while it fails with a short-lived ("retry") error.
+pub fn retry_loop<T>(delay: Duration, mut op: impl FnMut() -> Result<T, NetError>) -> Result<T, NetError> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match op() {
+            Err(e) if e.kind == "retry" && attempt < ATTEMPTS => thread::sleep(delay * attempt),
+            other => return other,
+        }
+    }
+}
+
+pub fn get_json(agent: &ureq::Agent, url: &str, what: &str) -> Result<serde_json::Value, NetError> {
+    retry_loop(Duration::from_secs(2), || {
+        let resp = agent.get(url).set("User-Agent", UA).set("Accept", "application/vnd.github+json").call().map_err(|e| describe(what, e))?;
+        resp.into_json().map_err(|e| NetError::retry(format!("Ответ GitHub оборвался ({what}): {e}")))
     })
 }
 
-pub fn get_bytes(agent: &ureq::Agent, url: &str, max: u64) -> Result<Vec<u8>, NetError> {
-    get_bytes_progress(agent, url, max, &|_| {})
-}
-
-// Same as get_bytes, but reports how many bytes have arrived so far.
-pub fn get_bytes_progress(agent: &ureq::Agent, url: &str, max: u64, progress: &dyn Fn(u64)) -> Result<Vec<u8>, NetError> {
-    retry_loop(|| {
-        let r = agent.get(url).set("User-Agent", UA).call().map_err(classify)?;
-        let mut reader = r.into_reader().take(max + 1);
-        let mut bytes = Vec::new();
+/// Downloads at most `limit` bytes; `progress` gets the byte count so far.
+pub fn get_bytes(agent: &ureq::Agent, url: &str, what: &str, limit: u64, progress: &dyn Fn(u64)) -> Result<Vec<u8>, NetError> {
+    retry_loop(Duration::from_secs(2), || {
+        let resp = agent.get(url).set("User-Agent", UA).call().map_err(|e| describe(what, e))?;
+        let mut reader = resp.into_reader().take(limit + 1);
+        let mut out = Vec::new();
         let mut buf = vec![0u8; 64 * 1024];
         progress(0);
         loop {
-            let n = reader.read(&mut buf).map_err(|e| NetError::retry(COOLDOWN, format!("Загрузка оборвалась: {e}")))?;
+            let n = reader.read(&mut buf).map_err(|e| NetError::retry(format!("Загрузка оборвалась ({what}): {e}")))?;
             if n == 0 { break; }
-            bytes.extend_from_slice(&buf[..n]);
-            progress(bytes.len() as u64);
+            out.extend_from_slice(&buf[..n]);
+            progress(out.len() as u64);
         }
-        if bytes.len() as u64 > max { return Err(NetError::fatal("Файл слишком большой")); }
-        Ok(bytes)
+        Ok(out)
+    })
+}
+
+/// Latest release tag via the github.com redirect. It is not the API, so the 60-requests-per-hour limit does not apply.
+pub fn latest_tag_web(agent: &ureq::Agent, repo: &str, what: &str) -> Result<String, NetError> {
+    let url = format!("https://github.com/{repo}/releases/latest");
+    retry_loop(Duration::from_secs(2), || {
+        let resp = agent.get(&url).set("User-Agent", UA).call().map_err(|e| describe(what, e))?;
+        tag_from_url(resp.get_url(), repo).ok_or_else(|| NetError::fatal(format!("GitHub не показал последний релиз ({what}).")))
+    })
+}
+
+pub fn tag_from_url(url: &str, repo: &str) -> Option<String> {
+    let rest = url.strip_prefix(&format!("https://github.com/{repo}/releases/tag/"))?;
+    let tag = rest.split(|c| c == '?' || c == '#').next().unwrap_or("");
+    let ok = !tag.is_empty() && tag.len() <= 64 && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) && tag != "." && tag != "..";
+    if ok { Some(tag.to_string()) } else { None }
+}
+
+/// SHA-256 of a release file from the release's file list page (also not the API).
+pub fn asset_digest_web(agent: &ureq::Agent, repo: &str, tag: &str, asset: &str, what: &str) -> Result<String, NetError> {
+    let url = format!("https://github.com/{repo}/releases/expanded_assets/{tag}");
+    let html = retry_loop(Duration::from_secs(2), || {
+        let resp = agent.get(&url).set("User-Agent", UA).call().map_err(|e| describe(what, e))?;
+        resp.into_string().map_err(|e| NetError::retry(format!("Ответ GitHub оборвался ({what}): {e}")))
+    })?;
+    digest_from_html(&html, asset).ok_or_else(|| NetError::fatal(format!("GitHub не показал контрольную сумму ({what}).")))
+}
+
+pub fn digest_from_html(html: &str, asset: &str) -> Option<String> {
+    let start = html.find(&format!("/{asset}\""))?;
+    let rest = &html[start..];
+    let block = &rest[..rest.find("</li>").unwrap_or(rest.len())];
+    block.match_indices("sha256:").find_map(|(i, _)| {
+        let hex = block.get(i + 7..i + 71)?;
+        if hex.bytes().all(|b| b.is_ascii_hexdigit()) { Some(hex.to_ascii_lowercase()) } else { None }
     })
 }
 
 #[cfg(test)]
 mod tests {
+    #[test] fn reads_tag_and_digest_from_github_pages() {
+        assert_eq!(tag_from_url("https://github.com/a/b/releases/tag/1.10.4", "a/b").as_deref(), Some("1.10.4"));
+        assert_eq!(tag_from_url("https://github.com/a/b/releases", "a/b"), None);
+        assert_eq!(tag_from_url("https://github.com/a/b/releases/tag/x/y", "a/b"), None);
+        let h = format!("<li><a href=\"/a/b/releases/download/1/f.tar.gz\">f.tar.gz</a> sha256:{}</li><li><a href=\"/a/b/releases/download/1/f.zip\">f.zip</a> <span>sha256:{}</span></li>", "1".repeat(64), "AB".repeat(32));
+        assert_eq!(digest_from_html(&h, "f.zip"), Some("ab".repeat(32)));
+        assert_eq!(digest_from_html(&h, "g.zip"), None);
+    }
+
     use super::*;
-    #[test] fn classifies_statuses() {
-        assert_eq!(classify_status(504, None, None, None, 0).kind, "retry");
-        assert_eq!(classify_status(502, None, None, None, 0).wait, COOLDOWN);
-        let limit = classify_status(403, Some("0"), Some(1300), None, 1000);
-        assert_eq!(limit.kind, "rate_limit");
-        assert_eq!(limit.wait, 301);
-        assert_eq!(classify_status(429, None, None, Some(30), 0).wait, 30);
-        assert_eq!(classify_status(403, Some("12"), None, None, 0).kind, "fatal");
-        assert_eq!(classify_status(404, None, None, None, 0).kind, "fatal");
+    use std::{cell::Cell, io::Write, net::TcpListener};
+
+    #[test] fn rate_limit_uses_reset_time() {
+        assert_eq!(rate_limit_wait(403, Some("0"), Some("1300"), None, 1000), Some(60));
+        assert_eq!(rate_limit_wait(429, None, None, Some("30"), 0), Some(30));
+        assert_eq!(rate_limit_wait(403, Some("12"), Some("1300"), None, 1000), None);
+        assert_eq!(rate_limit_wait(404, Some("0"), None, None, 0), None);
+        assert_eq!(rate_limit_wait(403, Some("0"), Some("999999"), None, 0), Some(60));
     }
-    #[test] fn retries_then_succeeds() {
-        let mut calls = 0;
-        let r = retry_loop(|| { calls += 1; if calls < 2 { Err(NetError::retry(1, "x")) } else { Ok(7) } });
-        assert_eq!(r, Ok(7));
-        assert_eq!(calls, 2);
+
+    #[test] fn retries_only_short_failures() {
+        let calls = Cell::new(0);
+        let r: Result<(), _> = retry_loop(Duration::ZERO, || { calls.set(calls.get() + 1); Err(NetError::retry("x".into())) });
+        assert_eq!(calls.get(), 3);
+        assert_eq!(r.unwrap_err().kind, "retry");
+        let calls = Cell::new(0);
+        let _: Result<(), _> = retry_loop(Duration::ZERO, || { calls.set(calls.get() + 1); Err(NetError::fatal("x")) });
+        assert_eq!(calls.get(), 1);
+        let calls = Cell::new(0);
+        let ok = retry_loop(Duration::ZERO, || { calls.set(calls.get() + 1); if calls.get() < 2 { Err(NetError::retry("x".into())) } else { Ok(7) } });
+        assert_eq!(ok.unwrap(), 7);
     }
-    #[test] fn fatal_stops_at_once() {
-        let mut calls = 0;
-        let r: Result<(), NetError> = retry_loop(|| { calls += 1; Err(NetError::fatal("no")) });
-        assert!(r.is_err());
-        assert_eq!(calls, 1);
+
+    fn mock(head: &'static str) -> NetError {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || { let (mut s, _) = listener.accept().unwrap(); let mut b = [0; 1024]; let _ = s.read(&mut b); let _ = s.write_all(head.as_bytes()); });
+        describe("тест", ureq::get(&format!("http://{addr}/")).call().unwrap_err())
+    }
+
+    #[test] fn classifies_github_errors() {
+        assert_eq!(mock("HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").kind, "retry");
+        let limited = mock("HTTP/1.1 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nretry-after: 40\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        assert_eq!((limited.kind, limited.wait), ("rate_limit", 40));
+        assert_eq!(mock("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").kind, "fatal");
     }
 }

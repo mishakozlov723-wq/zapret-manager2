@@ -1,5 +1,5 @@
 use serde::Serialize;
-use crate::net::NetError;
+use crate::net::{self, NetError};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File}, io::{self, Read, Write, Cursor}, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
@@ -8,7 +8,7 @@ const MAX_UNPACKED: u64 = 200 * 1024 * 1024;
 #[derive(Serialize)]
 pub struct Installed { pub tag: String, pub folder: String, pub reused: bool }
 
-fn safe_tag(tag: &str) -> bool {
+pub(crate) fn safe_tag(tag: &str) -> bool {
     !tag.is_empty() && tag.len() <= 64 && tag.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c)) && tag != "." && tag != ".."
 }
 fn valid_asset_url(value: &str, tag: &str) -> bool {
@@ -63,21 +63,45 @@ fn existing_release(base: &Path, tag: &str, digest: &str) -> Option<Installed> {
     }
     None
 }
-fn download_install(base: &Path) -> Result<Installed, NetError> {
-    let agent = super::https_agent(Duration::from_secs(90))?;
-    let json = super::net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
+const FLOWSEAL: &str = "Flowseal/zapret-discord-youtube";
+struct Remote { tag: String, href: String, digest: String, size: Option<u64> }
+
+fn release_from_api(agent: &ureq::Agent) -> Result<Remote, NetError> {
+    let json = net::get_json(agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest", "сведения о релизе Zapret")?;
     let tag = json["tag_name"].as_str().ok_or("Нет версии релиза")?;
     if !safe_tag(tag) { return Err("Некорректный номер версии".into()); }
     let asset = json["assets"].as_array().ok_or("В релизе нет файлов")?.iter().find(|a| a["name"].as_str().map_or(false, |n| n.starts_with("zapret-discord-youtube-") && n.ends_with(".zip")) && a["state"].as_str() == Some("uploaded")).ok_or("В релизе нет официального ZIP")?;
     let href = asset["browser_download_url"].as_str().ok_or("Нет ссылки на архив")?;
     if !valid_asset_url(href, tag) || href.rsplit('/').next() != asset["name"].as_str() { return Err("Неожиданный адрес архива".into()); }
     let digest = asset["digest"].as_str().and_then(|s| s.strip_prefix("sha256:")).ok_or("В релизе нет контрольной суммы SHA-256")?;
-    if digest.len()!=64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("Неверная контрольная сумма".into()); }
-    let size=asset["size"].as_u64().ok_or("Неизвестный размер архива")?;
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("Неверная контрольная сумма".into()); }
+    let size = asset["size"].as_u64().ok_or("Неизвестный размер архива")?;
     if size == 0 || size > MAX_ZIP { return Err("Недопустимый размер архива".into()); }
-    if let Some(found) = existing_release(base, tag, &digest.to_ascii_lowercase()) { return Ok(found); }
-    let bytes = super::net::get_bytes(&agent, href, MAX_ZIP)?;
-    if bytes.len() as u64 != size || format!("{:x}", Sha256::digest(&bytes)) != digest.to_ascii_lowercase() { return Err("Архив не прошёл проверку размера или SHA-256".into()); }
+    Ok(Remote { tag: tag.to_owned(), href: href.to_owned(), digest: digest.to_ascii_lowercase(), size: Some(size) })
+}
+
+fn release_from_web(agent: &ureq::Agent) -> Result<Remote, NetError> {
+    let tag = net::latest_tag_web(agent, FLOWSEAL, "сведения о релизе Zapret")?;
+    if !safe_tag(&tag) { return Err("Некорректный номер версии".into()); }
+    let name = format!("zapret-discord-youtube-{tag}.zip");
+    let href = format!("https://github.com/{FLOWSEAL}/releases/download/{tag}/{name}");
+    if !valid_asset_url(&href, &tag) { return Err("Неожиданный адрес архива".into()); }
+    let digest = net::asset_digest_web(agent, FLOWSEAL, &tag, &name, "контрольная сумма Zapret")?;
+    Ok(Remote { tag, href, digest, size: None })
+}
+
+fn download_install(base: &Path) -> Result<Installed, NetError> {
+    let agent = super::https_agent(Duration::from_secs(90))?;
+    let r = match release_from_api(&agent) {
+        Ok(r) => r,
+        // The API allows 60 requests per hour per address; github.com pages do not count against it.
+        Err(e) if e.kind != "fatal" => release_from_web(&agent).map_err(|w| if w.kind == "fatal" { e } else { w })?,
+        Err(e) => return Err(e),
+    };
+    let tag = r.tag.as_str();
+    if let Some(found) = existing_release(base, tag, &r.digest) { return Ok(found); }
+    let bytes = net::get_bytes(&agent, &r.href, "архив Zapret", MAX_ZIP, &|_| {})?;
+    if bytes.len() as u64 > MAX_ZIP || r.size.map_or(false, |s| bytes.len() as u64 != s) || format!("{:x}", Sha256::digest(&bytes)) != r.digest { return Err("Архив не прошёл проверку размера или SHA-256".into()); }
     fs::create_dir_all(base).map_err(|e| e.to_string())?;
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis();
     let dir=base.join(format!("{tag}-{stamp}")); fs::create_dir(&dir).map_err(|e|format!("Не удалось создать папку: {e}"))?;
@@ -88,7 +112,7 @@ fn download_install(base: &Path) -> Result<Installed, NetError> {
 }
 #[tauri::command]
 pub async fn install_release() -> Result<Installed, NetError> {
-    tauri::async_runtime::spawn_blocking(|| -> Result<Installed, NetError> {
+    tauri::async_runtime::spawn_blocking(|| {
         #[cfg(target_os="windows")]
         {
             let base = super::settings::downloads_dir()?;
@@ -100,7 +124,7 @@ pub async fn install_release() -> Result<Installed, NetError> {
         }
         #[cfg(not(target_os="windows"))]
         { Err("Установка доступна только в Windows".into()) }
-    }).await.map_err(|e| e.to_string())?
+    }).await.map_err(|e| NetError::fatal(e.to_string()))?
 }
 
 // Fixed script, no user-supplied commands or paths. Refuse an unrecognised service.

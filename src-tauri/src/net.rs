@@ -95,7 +95,7 @@ pub fn latest_tag_web(agent: &ureq::Agent, repo: &str, what: &str) -> Result<Str
 
 pub fn tag_from_url(url: &str, repo: &str) -> Option<String> {
     let rest = url.strip_prefix(&format!("https://github.com/{repo}/releases/tag/"))?;
-    let tag = rest.split(|c| c == '?' || c == '#').next().unwrap_or("");
+    let tag = rest.split(|c: char| c == '?' || c == '#').next().unwrap_or("");
     let ok = !tag.is_empty() && tag.len() <= 64 && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) && tag != "." && tag != "..";
     if ok { Some(tag.to_string()) } else { None }
 }

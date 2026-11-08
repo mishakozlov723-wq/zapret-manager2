@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zapret Manager</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="icons.css">
+<script defer src="app.js"></script>
+<script defer src="settings.js"></script>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand"><img class="brandicon" src="assets/brand.svg" alt=""><div><b>Zapret Manager</b><small>для zapret-discord-youtube</small></div></div>
+    <nav aria-label="Разделы">
+      <button class="nav active" data-page="home" type="button">Главная</button>
+      <button class="nav" data-page="strategies" type="button">Стратегии</button>
+      <button class="nav" data-page="checks" type="button">Проверка сайтов</button>
+      <button class="nav" data-page="versions" type="button">Версии</button>
+      <button class="nav" data-page="settings" type="button">Настройки</button>
+      <button class="nav" data-page="about" type="button">О программе</button>
+    </nav>
+    <div class="sidestatus" id="side-status" data-tone="idle" role="status" aria-live="polite">
+      <i aria-hidden="true"></i><div><b id="side-title">Проверяем…</b><small id="side-detail"></small></div>
+    </div>
+    <div class="sidefoot">Версия <b>0.2.0</b></div>
+  </aside>
+
+  <main>
+    <section class="page" id="home">
+      <header><div><h1>Главная</h1><p>Всё по шагам, по порядку.</p></div><button class="ghost" id="refresh" type="button">Проверить заново</button></header>
+      <div class="hero" id="hero" data-tone="idle">
+        <i class="dot" aria-hidden="true"></i>
+        <div class="hero-text"><h2 id="hero-title">Проверяем компьютер…</h2><p id="hero-detail">Ничего не меняем, только смотрим.</p></div>
+        <button class="primary" id="hero-action" type="button" hidden></button>
+      </div>
+      <div id="alerts" class="alerts"></div>
+      <ol class="steps" id="steps" aria-label="Шаги настройки"></ol>
+    </section>
+
+    <section class="page" id="strategies" hidden>
+      <header><div><h1>Стратегии</h1><p>Включена всегда только одна. Не открылся YouTube — переключитесь на соседнюю.</p></div></header>
+      <div id="strategy-locked" class="lockbox" hidden>
+        <b id="locked-title"></b><p id="locked-detail"></p>
+        <button class="primary" data-go="home" type="button">К шагам</button>
+      </div>
+      <div id="strategy-body" hidden>
+        <div class="statusbar" id="statusbar" data-tone="idle">
+          <i class="dot" aria-hidden="true"></i>
+          <div class="statusbar-text"><b id="sb-title"></b><small id="sb-detail"></small></div>
+          <label class="switch" id="autostart-switch"><input type="checkbox" id="autostart"><span aria-hidden="true"></span><b id="autostart-label">Запуск с Windows</b></label>
+          <button class="ghost danger" id="disconnect" type="button">Отключить</button>
+        </div>
+        <div id="strategy-groups"></div>
+      </div>
+    </section>
+
+    <section class="page" id="checks" hidden>
+      <header><div><h1>Проверка сайтов</h1><p>Отвечают ли сервисы с этого компьютера.</p></div></header>
+      <div class="panel" id="site-list"></div>
+      <div class="row-actions">
+        <button class="primary" id="test" type="button">Проверить сайты</button>
+        <button class="ghost" id="show-add" type="button" aria-expanded="false">Добавить сайт</button>
+      </div>
+      <form class="panel site-form" id="site-form" hidden>
+        <div class="form-fields">
+          <label>Название<input id="site-name" placeholder="Twitch" maxlength="60" required></label>
+          <label>Домен<input id="site-domain" placeholder="twitch.tv" maxlength="253" required></label>
+        </div>
+        <p class="form-error" id="form-error" role="alert"></p>
+        <div class="row-actions"><button class="primary" type="submit">Добавить</button><button class="ghost" type="button" id="cancel-add">Отмена</button></div>
+      </form>
+      <p id="test-msg" class="hint" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="page" id="versions" hidden>
+      <header><div><h1>Версии</h1><p>Официальные релизы Flowseal.</p></div></header>
+      <div class="panel rows">
+        <div class="row"><span>Скачано</span><b id="v-downloaded">—</b></div>
+        <div class="row"><span>Последний релиз</span><b id="release">не проверено</b><button class="ghost" id="check-release" type="button">Проверить</button></div>
+      </div>
+      <p class="hint" id="release-detail"></p>
+    </section>
+
+    <section class="page" id="settings" hidden>
+      <header><div><h1>Настройки</h1><p>Папки Zapret и ваши сайты.</p></div></header>
+      <div class="group-title">Папки</div>
+      <div class="panel rows" id="folders"></div>
+      <div class="group-title">Свои сайты</div>
+      <div class="panel domains">
+        <p class="hint">Попадут в list-general-user.txt. При скачивании новой версии её список остаётся свежим, а ваши сайты добавляются к нему.</p>
+        <form class="domain-add" id="domain-form">
+          <label class="sr-only" for="domain-input">Домен</label>
+          <input id="domain-input" placeholder="soundcloud.com" maxlength="253" autocomplete="off">
+          <button class="primary" type="submit">Добавить</button>
+        </form>
+        <p class="form-error" id="domain-error" role="alert"></p>
+        <div class="chips" id="domain-list"></div>
+        <div class="row-actions" id="domain-actions"></div>
+        <div class="dstatus" id="domain-status" data-tone="idle" role="status" aria-live="polite" hidden>
+          <i class="dot" aria-hidden="true"></i><span id="domain-status-text"></span>
+          <button class="primary" id="domain-apply" type="button" hidden>Переподключить</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="about" hidden>
+      <header><div><h1>О программе</h1><p>Независимый менеджер для Zapret.</p></div></header>
+      <div class="panel about">
+        <b>Zapret Manager 0.2.0</b>
+        <p>Основан на zapret-discord-youtube от Flowseal и Zapret от bol-van. Не является официальным приложением Flowseal.</p>
+        <p>Исходный проект: github.com/Flowseal/zapret-discord-youtube</p>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="modal-back" id="picker" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+    <div class="modal-head"><b id="picker-title">Выбор папки</b><button class="toast-close" id="picker-close" type="button" aria-label="Закрыть"></button></div>
+    <div class="crumbs" id="picker-path"></div>
+    <div class="drives" id="picker-drives"></div>
+    <div class="dirlist" id="picker-list" role="listbox" aria-label="Папки"></div>
+    <form class="domain-add" id="picker-new">
+      <label class="sr-only" for="picker-name">Новая папка</label>
+      <input id="picker-name" placeholder="Новая папка" maxlength="80" autocomplete="off">
+      <button class="ghost" type="submit">Создать</button>
+    </form>
+    <p class="form-error" id="picker-error" role="alert"></p>
+    <div class="row-actions"><button class="primary" id="picker-ok" type="button">Выбрать эту папку</button><button class="ghost" id="picker-cancel" type="button">Отмена</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden>
+  <span id="toast-text"></span>
+  <button class="ghost" id="toast-action" type="button" hidden></button>
+  <button class="toast-close" id="toast-close" type="button" aria-label="Закрыть"></button>
+</div>
+</body>
+</html>

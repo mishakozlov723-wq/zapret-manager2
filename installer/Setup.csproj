@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Zapret-Manager-Setup</AssemblyName>
+    <Version>0.2.0</Version>
+    <ApplicationIcon>../src-tauri/icons/icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- UI font = "Poppins, Manrope" fallback chain. Poppins copy has no digits (scripts/make-installer-poppins.py),
+         so Latin -> Poppins, Cyrillic and digits -> Manrope. Manrope as static weights: WPF cannot use variable weights. -->
+    <Resource Include="Assets/Fonts/Poppins-*.ttf" />
+    <Resource Include="Assets/Fonts/Manrope-*.ttf" />
+    <Resource Include="../src-tauri/icons/128x128.png" Link="Assets/brand.png" />
+    <Resource Include="../src-tauri/icons/icon.ico" Link="Assets/icon.ico" />
+    <EmbeddedResource Include="../ui/assets/icons/*.svg" LogicalName="Icons.%(Filename).svg" />
+    <EmbeddedResource Include="../src-tauri/target/release/bundle/nsis/Zapret Manager_0.2.0_x64-setup.exe" LogicalName="Payload.setup.exe" />
+    <EmbeddedResource Include="$(IntermediateOutputPath)app.sha256" LogicalName="Payload.app.sha256" />
+    <EmbeddedResource Include="$(IntermediateOutputPath)app.size" LogicalName="Payload.app.size" />
+  </ItemGroup>
+  <!-- Byte size of the packaged app exe: lets the installer show real write progress while NSIS runs. -->
+  <UsingTask TaskName="FileSize" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup><Path ParameterType="System.String" Required="true" /><Size ParameterType="System.String" Output="true" /></ParameterGroup>
+    <Task><Code Type="Fragment" Language="cs">Size = new System.IO.FileInfo(Path).Length.ToString();</Code></Task>
+  </UsingTask>
+  <Target Name="GeneratePayloadHash" BeforeTargets="PrepareForBuild">
+    <GetFileHash Files="../src-tauri/target/release/zapret-manager.exe" Algorithm="SHA256"><Output TaskParameter="Items" ItemName="AppHash"/></GetFileHash>
+    <FileSize Path="$(MSBuildProjectDirectory)/../src-tauri/target/release/zapret-manager.exe"><Output TaskParameter="Size" PropertyName="AppSize"/></FileSize>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)app.sha256" Lines="@(AppHash->'%(FileHash)')" Overwrite="true" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)app.size" Lines="$(AppSize)" Overwrite="true" />
+  </Target>
+</Project>

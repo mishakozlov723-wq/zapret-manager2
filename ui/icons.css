@@ -1,0 +1,50 @@
+/* The user's Lucide SVGs are local assets, inherited colour, never text glyphs. */
+[data-icon],.nav::before,#refresh::before,#disconnect::before,#test::before,#show-add::before,#check-release::before,#domain-apply::before,#picker-new button::before,#picker-ok::before,.toast-close::before,.site-result::before,.statusbar>.dot,.hero>.dot,.sidestatus>i,.dstatus>.dot,.chip:not(.idle)::before{
+  display:inline-block;flex:none;width:16px;height:16px;background:currentColor;border-radius:0;box-shadow:none;content:'';
+  -webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat;
+}
+[data-icon="house"],.nav[data-page="home"]{--icon:url('assets/icons/house.svg')}
+[data-icon="layout-grid"],.nav[data-page="strategies"]{--icon:url('assets/icons/layout-grid.svg')}
+[data-icon="globe"],.nav[data-page="checks"]{--icon:url('assets/icons/globe.svg')}
+[data-icon="download"],.nav[data-page="versions"]{--icon:url('assets/icons/download.svg')}
+[data-icon="settings"],.nav[data-page="settings"]{--icon:url('assets/icons/settings.svg')}
+[data-icon="info"],.nav[data-page="about"]{--icon:url('assets/icons/info.svg')}
+[data-icon="check"]{--icon:url('assets/icons/check.svg')}
+[data-icon="circle-check"]{--icon:url('assets/icons/circle-check.svg')}
+[data-icon="monitor-check"]{--icon:url('assets/icons/monitor-check.svg')}
+[data-icon="shield-check"]{--icon:url('assets/icons/shield-check.svg')}
+[data-icon="power"],#disconnect{--icon:url('assets/icons/power.svg')}
+[data-icon="refresh-cw"],#refresh,#check-release,#domain-apply{--icon:url('assets/icons/refresh-cw.svg')}
+[data-icon="plus"],#show-add{--icon:url('assets/icons/plus.svg')}
+[data-icon="x"],.toast-close{--icon:url('assets/icons/x.svg')}
+[data-icon="folder"]{--icon:url('assets/icons/folder.svg')}
+[data-icon="folder-open"],#picker-ok{--icon:url('assets/icons/folder-open.svg')}
+[data-icon="folder-plus"],#picker-new button{--icon:url('assets/icons/folder-plus.svg')}
+[data-icon="hard-drive"]{--icon:url('assets/icons/hard-drive.svg')}
+[data-icon="archive"]{--icon:url('assets/icons/archive.svg')}
+[data-icon="server"]{--icon:url('assets/icons/server.svg')}
+[data-icon="arrow-up"]{--icon:url('assets/icons/arrow-up.svg')}
+[data-icon="chevron-right"]{--icon:url('assets/icons/chevron-right.svg')}
+[data-icon="triangle-alert"]{--icon:url('assets/icons/triangle-alert.svg')}
+[data-icon="search"],#test{--icon:url('assets/icons/search.svg')}
+[data-icon="rotate-ccw"]{--icon:url('assets/icons/rotate-ccw.svg')}
+[data-icon="trash-2"]{--icon:url('assets/icons/trash-2.svg')}
+.hero>.dot,.statusbar>.dot,.sidestatus>i,.dstatus>.dot{--icon:url('assets/icons/power.svg');color:var(--tone)}
+[data-tone="ok"]>.dot,[data-tone="ok"].sidestatus>i{--icon:url('assets/icons/shield-check.svg')}
+[data-tone="warn"]>.dot,[data-tone="bad"]>.dot,[data-tone="warn"].sidestatus>i,[data-tone="bad"].sidestatus>i{--icon:url('assets/icons/triangle-alert.svg')}
+.hero>.dot{width:24px;height:24px}
+.alert>[data-icon]{color:var(--tone);margin-top:2px}
+.chip:not(.idle){display:inline-flex;align-items:center;gap:4px}
+.chip:not(.idle)::before{--icon:url('assets/icons/check.svg');width:12px;height:12px}
+.site-result::before{--icon:url('assets/icons/search.svg');background:currentColor}
+.site-result.good::before{--icon:url('assets/icons/circle-check.svg');background:currentColor}
+.site-result.bad::before{--icon:url('assets/icons/triangle-alert.svg');background:currentColor}
+.site-result.pending::before{--icon:url('assets/icons/refresh-cw.svg');animation:rot 1s linear infinite}
+.drive{display:inline-flex;align-items:center;gap:7px}
+.dir>[data-icon="folder"]{color:var(--warn)}
+.folder-title>[data-icon]{color:var(--tx2)}
+.crumbs>[data-icon]{width:12px;height:12px;color:var(--tx3)}
+.path,.dchip{font-family:Poppins,Manrope,'Segoe UI',sans-serif;font-variant-numeric:tabular-nums}
+.num,.sidefoot,#v-downloaded,#release{font-variant-numeric:tabular-nums}
+.toast-close{display:grid;place-items:center}
+@media(max-width:600px){.site{flex-wrap:wrap;gap:4px;padding:10px 12px}.site-info{flex-basis:100%}.site-right{width:100%;justify-content:space-between}.site-result{text-align:left}.nav::before{width:14px;height:14px}.remove-site{width:44px;height:44px}.dchip{height:36px}.dchip button{width:32px;height:32px}}

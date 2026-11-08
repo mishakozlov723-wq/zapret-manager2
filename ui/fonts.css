@@ -1,0 +1,6 @@
+/* Bundled OFL fonts. Latin letters use Poppins; Cyrillic, digits and punctuation use Manrope. */
+@font-face{font-family:Manrope;src:url('assets/fonts/Manrope-Variable.ttf') format('truetype');font-style:normal;font-weight:200 800;font-display:swap}
+@font-face{font-family:Poppins;src:url('assets/fonts/Poppins-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap;unicode-range:U+0041-005A,U+0061-007A,U+00C0-024F,U+1E00-1EFF}
+@font-face{font-family:Poppins;src:url('assets/fonts/Poppins-Medium.ttf') format('truetype');font-style:normal;font-weight:500;font-display:swap;unicode-range:U+0041-005A,U+0061-007A,U+00C0-024F,U+1E00-1EFF}
+@font-face{font-family:Poppins;src:url('assets/fonts/Poppins-SemiBold.ttf') format('truetype');font-style:normal;font-weight:600;font-display:swap;unicode-range:U+0041-005A,U+0061-007A,U+00C0-024F,U+1E00-1EFF}
+@font-face{font-family:Poppins;src:url('assets/fonts/Poppins-Bold.ttf') format('truetype');font-style:normal;font-weight:700 800;font-display:swap;unicode-range:U+0041-005A,U+0061-007A,U+00C0-024F,U+1E00-1EFF}

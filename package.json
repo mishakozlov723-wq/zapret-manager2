@@ -1,0 +1,15 @@
+{
+  "name": "zapret-manager",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:installer": "node scripts/build-installer.mjs",
+    "build:release": "npm run build && npm run build:installer"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

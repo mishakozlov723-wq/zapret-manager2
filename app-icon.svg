@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Vector recreation of the user's globe and spark reference; transparent background. -->
+  <g fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M370 91 A200 200 0 1 0 443.94 187.60"/>
+    <ellipse cx="256" cy="256" rx="90" ry="200"/>
+    <path d="M56 256H456"/>
+  </g>
+  <path fill="#00df9a" d="M416 78C427 111 427 111 458 122C427 133 427 133 416 166C405 133 405 133 374 122C405 111 405 111 416 78Z"/>
+</svg>

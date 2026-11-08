@@ -1,0 +1,19 @@
+[package]
+name = "zapret-manager"
+version = "0.2.0"
+edition = "2021"
+description = "An independent interface for zapret-discord-youtube"
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+url = "2"
+native-tls = "0.2"
+
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+base64 = "0.22"
+flate2 = "1"

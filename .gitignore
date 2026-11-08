@@ -1,0 +1,8 @@
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/
+installer/bin/
+installer/obj/
+dist/
+installer-verification/

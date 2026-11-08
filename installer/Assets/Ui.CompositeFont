@@ -1,0 +1,8 @@
+<FontFamily xmlns="http://schemas.microsoft.com/winfx/2006/xaml/composite-font" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+  <FontFamily.FamilyNames><sys:String Key="en-US">Manager UI</sys:String></FontFamily.FamilyNames>
+  <FontFamily.FamilyMaps>
+    <!-- Targets are relative to this file (Assets/): absolute pack:// targets are ignored by WPF. Digits are not in the Poppins range, so they go to Manrope. -->
+    <FontFamilyMap Unicode="0041-005A,0061-007A,00C0-024F,1E00-1EFF" Target="./Fonts/#Poppins" />
+    <FontFamilyMap Unicode="0000-FFFF" Target="./Fonts/#Manrope" />
+  </FontFamily.FamilyMaps>
+</FontFamily>

@@ -1,0 +1,145 @@
+<Window x:Class="ManagerSetup.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:ManagerSetup"
+        Title="Установка — Zapret Manager" Width="1000" Height="680" MinWidth="840" MinHeight="600" Background="{StaticResource Bg}" Foreground="{StaticResource Tx}"
+        FontFamily="{StaticResource UiFont}" FontSize="13.5" WindowStartupLocation="CenterScreen" Icon="Assets/icon.ico" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType" TextOptions.TextHintingMode="Fixed" RenderOptions.ClearTypeHint="Enabled">
+ <!-- Layout mirrors ui/index.html: 212px aside (.brand, nav, .sidestatus, .sidefoot) + main .page (max 760px). -->
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="224"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+  <Border Background="{StaticResource Side}" BorderBrush="{StaticResource Ln}" BorderThickness="0,0,1,0" Padding="10,14">
+   <DockPanel LastChildFill="False">
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="10,4,10,14">
+     <Border Width="38" Height="38" CornerRadius="10" Background="{StaticResource Tile}" BorderBrush="{StaticResource Ln}" BorderThickness="1"><Image Source="Assets/brand.png" Width="26" Height="26" RenderOptions.BitmapScalingMode="HighQuality"/></Border>
+     <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+      <TextBlock Text="Zapret Manager" FontWeight="Bold" FontSize="14" TextWrapping="NoWrap"/>
+      <TextBlock Text="установка программы" Foreground="{StaticResource Tx3}" FontSize="12" TextWrapping="NoWrap"/>
+     </StackPanel>
+    </StackPanel>
+    <TextBlock DockPanel.Dock="Top" Text="ШАГИ" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Tx3}" Margin="12,0,0,6"/>
+    <StackPanel x:Name="Nav" DockPanel.Dock="Top" AutomationProperties.Name="Шаги установки"/>
+    <TextBlock DockPanel.Dock="Bottom" Margin="12,10,10,0" FontSize="12" Foreground="{StaticResource Tx3}">Версия <Bold>0.2.0</Bold> · Windows x64</TextBlock>
+    <Border DockPanel.Dock="Bottom" Background="{StaticResource Card}" BorderBrush="{StaticResource Ln}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+     <DockPanel>
+      <ContentControl x:Name="SideDot" VerticalAlignment="Center" Margin="0,0,10,0"/>
+      <StackPanel>
+       <TextBlock x:Name="SideTitle" Text="Готов к установке" FontWeight="Bold" FontSize="13" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+       <TextBlock x:Name="SideDetail" Text="Выберите папку" Foreground="{StaticResource Tx3}" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+      </StackPanel>
+     </DockPanel>
+    </Border>
+   </DockPanel>
+  </Border>
+
+  <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Focusable="False">
+   <!-- .page: fills the column up to 760px, left aligned (Stretch+MaxWidth would centre it). -->
+   <Grid Margin="32,26,32,48">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" MaxWidth="760"/><ColumnDefinition Width="0"/></Grid.ColumnDefinitions>
+
+    <!-- 1. Location -->
+    <StackPanel x:Name="LocationPage">
+     <DockPanel Margin="0,0,0,16">
+      <Button x:Name="CancelButton" DockPanel.Dock="Right" Content="Отмена" VerticalAlignment="Top" Click="CancelClick"/>
+      <StackPanel><TextBlock Text="Установка" FontSize="24" FontWeight="Bold"/><TextBlock Text="Поставим Zapret Manager на этот компьютер." Foreground="{StaticResource Tx2}" Margin="0,4,0,0"/></StackPanel>
+     </DockPanel>
+     <Border x:Name="LocationHero" CornerRadius="16" BorderThickness="1" Padding="20,20">
+      <DockPanel>
+       <ContentControl x:Name="LocationDot" VerticalAlignment="Center" Margin="0,0,16,0"/>
+       <Button x:Name="ActionButton" DockPanel.Dock="Right" Style="{StaticResource Primary}" Click="ActionClick" Margin="14,0,0,0">
+        <StackPanel Orientation="Horizontal"><ContentControl x:Name="InstallIcon" Margin="0,0,7,0"/><TextBlock x:Name="ActionText" Text="Установить"/></StackPanel>
+       </Button>
+       <StackPanel VerticalAlignment="Center">
+        <TextBlock x:Name="LocationTitle" Text="Всё готово к установке" FontSize="18" FontWeight="Bold"/>
+        <TextBlock x:Name="InstallNote" Text="Только для вашей учётной записи. Настройки и работающий обход не изменятся." Foreground="{StaticResource Tx2}" Margin="0,2,0,0"/>
+       </StackPanel>
+      </DockPanel>
+     </Border>
+     <Border x:Name="ErrorBox" Visibility="Collapsed" Margin="0,12,0,0" CornerRadius="12" BorderThickness="1" Padding="16,13">
+      <DockPanel>
+       <ContentControl x:Name="ErrorDot" VerticalAlignment="Top" Margin="0,1,12,0"/>
+       <StackPanel><TextBlock Text="Не получилось" FontWeight="Bold"/><TextBlock x:Name="ErrorText" Foreground="{StaticResource Tx2}" FontSize="13" Margin="0,2,0,0"/></StackPanel>
+      </DockPanel>
+     </Border>
+
+     <local:GroupTitle Text="Папка"/>
+     <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Ln}" BorderThickness="1" CornerRadius="14" Padding="18,16">
+      <DockPanel>
+       <Button x:Name="BrowseButton" DockPanel.Dock="Right" VerticalAlignment="Top" Margin="12,1,0,0" Click="BrowseClick">
+        <StackPanel Orientation="Horizontal"><ContentControl x:Name="FolderIcon" Margin="0,0,7,0"/><TextBlock Text="Изменить"/></StackPanel>
+       </Button>
+       <StackPanel>
+        <StackPanel Orientation="Horizontal">
+         <ContentControl x:Name="RowIcon" Margin="0,0,12,0" VerticalAlignment="Center"/>
+         <TextBlock Text="Папка программы" FontWeight="Bold" FontSize="14.5" VerticalAlignment="Center"/>
+         <Border x:Name="DefaultChip" Margin="8,0,0,0" CornerRadius="8" Background="#215FCF98" Padding="8,3" VerticalAlignment="Center">
+          <TextBlock Text="ПО УМОЛЧАНИЮ" FontSize="11" FontWeight="Bold" Foreground="{StaticResource Ok}"/>
+         </Border>
+        </StackPanel>
+        <TextBlock Text="Сюда запишем файлы менеджера. Удалить программу можно через «Параметры Windows»." Foreground="{StaticResource Tx2}" FontSize="12.5" Margin="0,6,0,10"/>
+        <TextBox x:Name="InstallPath" Style="{StaticResource PathBox}" AutomationProperties.Name="Папка установки" TextChanged="PathChanged"/>
+       </StackPanel>
+      </DockPanel>
+     </Border>
+
+     <WrapPanel x:Name="Facts" Margin="0,10,0,0"/>
+
+     <local:GroupTitle Text="Что сделаем"/>
+     <StackPanel x:Name="PlanSteps"/>
+    </StackPanel>
+
+    <!-- 2. Progress -->
+    <StackPanel x:Name="ProgressPage" Visibility="Collapsed">
+     <DockPanel Margin="0,0,0,16">
+      <StackPanel><TextBlock Text="Установка" FontSize="24" FontWeight="Bold"/><TextBlock x:Name="ProgressSubtitle" Text="Не закрывайте окно — это займёт меньше минуты." Foreground="{StaticResource Tx2}" Margin="0,4,0,0"/></StackPanel>
+     </DockPanel>
+     <Border x:Name="ProgressHero" CornerRadius="16" BorderThickness="1" Padding="20,20">
+      <StackPanel>
+       <DockPanel>
+        <ContentControl x:Name="ProgressDot" VerticalAlignment="Center" Margin="0,0,16,0"/>
+        <Button x:Name="ContinueButton" DockPanel.Dock="Right" Style="{StaticResource Primary}" Visibility="Collapsed" Margin="14,0,0,0" Click="ContinueClick">
+         <StackPanel Orientation="Horizontal"><TextBlock Text="Продолжить"/><ContentControl x:Name="ContinueIcon" Margin="6,0,-4,0"/></StackPanel>
+        </Button>
+        <TextBlock x:Name="PercentText" DockPanel.Dock="Right" Text="0%" FontSize="26" FontWeight="Bold" VerticalAlignment="Center" Margin="16,0,0,0"/>
+        <StackPanel VerticalAlignment="Center">
+         <TextBlock x:Name="ProgressTitle" Text="Распаковываем пакет" FontSize="18" FontWeight="Bold"/>
+         <TextBlock x:Name="ProgressText" Text="Подготавливаем файлы…" Foreground="{StaticResource Tx2}" Margin="0,2,0,0"/>
+        </StackPanel>
+       </DockPanel>
+       <ProgressBar x:Name="Progress" Minimum="0" Maximum="1" Value="0" Margin="0,18,0,0" AutomationProperties.Name="Ход установки"/>
+      </StackPanel>
+     </Border>
+     <local:GroupTitle Text="Этапы"/>
+     <StackPanel x:Name="StageList"/>
+    </StackPanel>
+
+    <!-- 3. Done -->
+    <StackPanel x:Name="DonePage" Visibility="Collapsed">
+     <DockPanel Margin="0,0,0,16">
+      <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="Закрыть" VerticalAlignment="Top" Click="CancelClick"/>
+      <StackPanel><TextBlock Text="Всё готово" FontSize="24" FontWeight="Bold"/><TextBlock Text="Менеджер установлен и зарегистрирован в Windows." Foreground="{StaticResource Tx2}" Margin="0,4,0,0"/></StackPanel>
+     </DockPanel>
+     <Border x:Name="DoneHero" CornerRadius="16" BorderThickness="1" Padding="20,20">
+      <DockPanel>
+       <ContentControl x:Name="DoneIcon" VerticalAlignment="Center" Margin="0,0,16,0"/>
+       <Button x:Name="OpenButton" DockPanel.Dock="Right" Style="{StaticResource Primary}" Margin="14,0,0,0" Click="OpenClick">
+        <StackPanel Orientation="Horizontal"><ContentControl x:Name="OpenIcon" Margin="0,0,7,0"/><TextBlock Text="Открыть менеджер"/></StackPanel>
+       </Button>
+       <StackPanel VerticalAlignment="Center">
+        <TextBlock Text="Zapret Manager установлен" FontSize="18" FontWeight="Bold"/>
+        <TextBlock x:Name="DonePath" Foreground="{StaticResource Tx2}" FontFamily="{StaticResource MonoFont}" FontSize="13" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+       </StackPanel>
+      </DockPanel>
+     </Border>
+     <Border x:Name="LaunchErrorBox" Visibility="Collapsed" Margin="0,12,0,0" CornerRadius="12" BorderThickness="1" Padding="16,13">
+      <TextBlock x:Name="LaunchErrorText" Foreground="{StaticResource Tx2}" FontSize="13"/>
+     </Border>
+     <local:GroupTitle Text="Дальше"/>
+     <StackPanel x:Name="NextSteps"/>
+    </StackPanel>
+   </Grid>
+  </ScrollViewer>
+
+  <!-- .modal-back + .modal: in-window folder picker, like the manager settings. -->
+  <Grid x:Name="PickerLayer" Grid.ColumnSpan="2" Visibility="Collapsed" Background="#A6000000">
+   <local:FolderPicker x:Name="Picker" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Grid>
+ </Grid>
+</Window>

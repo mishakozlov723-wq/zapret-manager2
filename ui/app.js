@@ -2,7 +2,7 @@
 // Zapret Manager UI. One state snapshot (overview) drives every page; actions run one at a time.
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__?.core.invoke(name, args) ?? Promise.reject(new Error('Запустите приложение Windows.'));
-const S = { ov: null, err: null, list: null, listErr: null, listTag: null, busy: null, release: null, seq: 0, checkedAt: null, lastKey: '' };
+const S = { ov: null, err: null, list: null, listErr: null, listTag: null, busy: null, release: null, seq: 0, checkedAt: null, lastKey: '', cool: {} };
 
 function h(tag, props = {}, ...kids) {
   const el = document.createElement(tag);
@@ -91,7 +91,7 @@ async function run(key, fn, serviceOnly = false) {
   // Invalidate an older overview so it cannot overwrite this operation.
   ++snapshotRequest; S.seq = 0;
   S.busy = key; render();
-  try { await fn(); } catch (e) { toast(String(e), 'bad'); }
+  try { await fn(); } catch (e) { if (isCool(e) && (key === 'install' || key === 'update')) { startCool('zapret', e); toast(coolMsg(e), 'info'); } else toast(errText(e), 'bad'); }
   finally {
     if (serviceOnly) {
       try {
@@ -107,6 +107,26 @@ async function run(key, fn, serviceOnly = false) {
     } else { await refresh(); S.busy = null; render(); }
   }
 }
+
+// ---------- GitHub cooldown: after quiet retries fail, the button waits instead of failing again at once.
+const errText = e => (e && typeof e === 'object' && e.message) ? e.message : String(e);
+const isCool = e => !!e && typeof e === 'object' && (e.kind === 'retry' || e.kind === 'rate_limit') && e.wait > 0;
+const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const COOL_HINT = 'Если GitHub не открывается без обхода, верните старый Zapret на шаге 2 и попробуйте снова.';
+const coolLeft = k => { const t = S.cool[k]; if (!t) return 0; const s = Math.ceil((t - Date.now()) / 1000); return s > 0 ? s : 0; };
+const coolMsg = e => e.kind === 'rate_limit' ? `GitHub временно ограничил запросы. Повторить можно через ${mmss(e.wait)}.` : `GitHub не ответил: ${e.message}. Повторить можно через ${mmss(e.wait)}.`;
+let coolTimer = null;
+function startCool(k, e) { S.cool[k] = Date.now() + e.wait * 1000; if (!coolTimer) coolTimer = setInterval(tickCool, 1000); render(); renderAbout(); }
+function tickCool() {
+  let any = false, ended = false;
+  for (const k of Object.keys(S.cool)) { if (coolLeft(k)) any = true; else { delete S.cool[k]; ended = true; } }
+  document.querySelectorAll('[data-cool]').forEach(el => { el.textContent = 'Повторить через ' + mmss(coolLeft(el.dataset.cool)); });
+  const cr = $('check-release'); if (cr && coolLeft('zapret')) cr.textContent = 'Через ' + mmss(coolLeft('zapret'));
+  if (ended) { render(); renderAbout(); }
+  if (!any) { clearInterval(coolTimer); coolTimer = null; }
+}
+function coolBtn(k) { return h('button', { type: 'button', class: 'ghost cool', disabled: true }, h('span', { 'data-cool': k }, 'Повторить через ' + mmss(coolLeft(k)))); }
+function coolOr(b) { return coolLeft('zapret') ? h('span', { class: 'cool-wrap' }, coolBtn('zapret'), h('small', { class: 'cool-hint' }, COOL_HINT)) : b; }
 
 // ---------- actions
 const install = () => run('install', async () => {
@@ -144,7 +164,7 @@ function render() {
   // A background re-check must not rebuild buttons under the cursor: the "checking" flag only matters
   // before the first snapshot exists; afterwards redraw only when the data really changed.
   // Each section redraws only from its own inputs, so a late strategy list does not rebuild home buttons mid-click.
-  const homeKey = JSON.stringify([S.ov, S.err, S.busy, S.release, !S.ov && !!S.seq]);
+  const homeKey = JSON.stringify([S.ov, S.err, S.busy, S.release, !S.ov && !!S.seq, !!coolLeft('zapret')]);
   const strat = JSON.stringify([homeKey, S.list, S.listErr]);
   if (homeKey !== S.lastKey) { S.lastKey = homeKey; renderHome(); renderSide(); renderVersions(); }
   if (strat !== S.lastStratKey) { S.lastStratKey = strat; renderStrategies(); }
@@ -204,8 +224,8 @@ function renderHome() {
   if (!d.cleared) step(3, 'locked', 'Скачать Zapret', 'Станет доступно после шага 2.');
   else if (d.downloaded) {
     const newer = S.release && S.release !== d.downloaded;
-    step(3, 'done', 'Скачать Zapret', `Версия ${d.downloaded}, проверена по SHA-256.${newer ? ` Вышла ${S.release}.` : ''}`, [newer ? btn({ label: `Скачать ${S.release}`, cls: 'primary', key: 'install', busyLabel: 'Скачиваем…', onclick: install }) : btn({ label: 'Проверить обновление', key: 'update', busyLabel: 'Проверяем…', onclick: checkUpdate })]);
-  } else step(3, 'current', 'Скачать Zapret', 'Официальный архив Flowseal с GitHub, проверка SHA-256.', [btn({ label: 'Скачать', cls: 'primary', key: 'install', busyLabel: 'Скачиваем…', onclick: install })]);
+    step(3, 'done', 'Скачать Zapret', `Версия ${d.downloaded}, проверена по SHA-256.${newer ? ` Вышла ${S.release}.` : ''}`, [coolOr(newer ? btn({ label: `Скачать ${S.release}`, cls: 'primary', key: 'install', busyLabel: 'Скачиваем…', onclick: install }) : btn({ label: 'Проверить обновление', key: 'update', busyLabel: 'Проверяем…', onclick: checkUpdate }))]);
+  } else step(3, 'current', 'Скачать Zapret', 'Официальный архив Flowseal с GitHub, проверка SHA-256.', [coolOr(btn({ label: 'Скачать', cls: 'primary', key: 'install', busyLabel: 'Скачиваем…', onclick: install }))]);
 
   if (!d.ready) step(4, 'locked', 'Включить стратегию', 'Станет доступно после шагов 2 и 3.');
   else if (d.connected) step(4, 'done', 'Включить стратегию', `Работает ${base(ov.manager.strategy)}. Если YouTube не открывается, переключите стратегию.`, [btn({ label: 'Стратегии', onclick: () => go('strategies') })]);
@@ -303,8 +323,11 @@ function renderVersions() {
   const dl = S.ov?.downloaded;
   $('v-downloaded').textContent = dl || 'не скачано';
   $('release').textContent = S.release || 'не проверено';
-  $('check-release').disabled = !!S.busy;
+  const zc = coolLeft('zapret');
+  $('check-release').disabled = !!S.busy || !!zc;
+  $('check-release').textContent = zc ? 'Через ' + mmss(zc) : 'Проверить';
   $('release-detail').textContent = !S.release || !dl ? '' : S.release === dl ? 'У вас последняя версия.' : 'Есть новая версия — скачайте её на главной, шаг 3.';
+  if (zc) $('release-detail').textContent = 'GitHub не ответил. ' + COOL_HINT;
 }
 $('check-release').addEventListener('click', () => run('update', async () => { S.release = (await invoke('latest_release')).tag; }));
 
@@ -370,5 +393,68 @@ $('test').addEventListener('click', async () => {
   document.querySelectorAll('.remove-site').forEach(b => { b.disabled = false; });
 });
 
+// ---------- app updates (О программе)
+const A = { version: null, info: null, state: 'idle', err: null, done: 0, total: 0 };
+const mb = n => (n / 1048576).toFixed(1).replace('.', ',');
+let progTimer = null;
+async function checkApp(silent = false) {
+  if (A.state === 'checking' || A.state === 'downloading' || A.state === 'ready' || coolLeft('app')) return;
+  A.state = 'checking'; A.err = null; if (!silent) renderAbout();
+  try {
+    A.info = await invoke('check_app_update'); A.state = A.info.available ? 'available' : 'latest';
+    if (silent && A.info.available) toast(`Вышла новая версия программы ${A.info.latest}.`, 'info', { label: 'Обновить', fn: () => go('about') });
+  } catch (e) { A.state = 'idle'; if (!silent) { A.err = errText(e); if (isCool(e)) startCool('app', e); } }
+  renderAbout();
+}
+async function downloadApp() {
+  if (A.state !== 'available') return;
+  A.state = 'downloading'; A.err = null; A.done = 0; A.total = A.info.size; renderAbout();
+  progTimer = setInterval(async () => { try { const p = await invoke('app_update_progress'); A.done = p.done; A.total = p.total || A.total; updateProgress(); } catch (_) {} }, 300);
+  try { await invoke('download_app_update'); A.done = A.total; A.state = 'ready'; }
+  catch (e) { A.state = 'available'; A.err = errText(e); if (isCool(e)) startCool('app', e); }
+  finally { clearInterval(progTimer); progTimer = null; }
+  renderAbout();
+}
+async function launchApp() {
+  A.state = 'launching'; A.err = null; renderAbout();
+  try { await invoke('launch_app_update'); } catch (e) { A.state = 'ready'; A.err = errText(e); renderAbout(); }
+}
+function updateProgress() {
+  const bar = document.querySelector('#app-update .upd-bar i');
+  if (bar) bar.style.width = (A.total ? Math.min(100, A.done / A.total * 100) : 0) + '%';
+  const t = $('upd-progress'); if (t) t.textContent = `Скачано ${mb(A.done)} из ${mb(A.total)} МБ`;
+}
+function renderAbout() {
+  const box = $('app-update'); if (!box) return;
+  const v = A.version || '…';
+  $('about-version').textContent = 'Zapret Manager ' + v;
+  const nav = document.querySelector('.nav[data-page="about"]');
+  if (nav) nav.classList.toggle('has-update', !!A.info?.available);
+  const B = (label, cls, onclick, disabled) => h('button', { type: 'button', class: cls, onclick, disabled }, label);
+  const cool = coolLeft('app');
+  let title = 'Обновления программы', desc = 'Проверим, вышла ли новая версия Zapret Manager.';
+  const actions = [];
+  if (A.state === 'checking') { desc = 'Проверяем на GitHub…'; actions.push(B('Проверяем…', 'ghost', null, true)); }
+  else if (A.state === 'latest') { title = 'У вас последняя версия'; desc = `Установлена версия ${v}.`; actions.push(cool ? coolBtn('app') : B('Проверить ещё раз', 'ghost', () => checkApp())); }
+  else if (A.state === 'available') { title = `Вышла версия ${A.info.latest}`; desc = A.info.notes || 'Новая версия готова к загрузке.'; actions.push(cool ? coolBtn('app') : B(`Скачать ${A.info.latest} · ${mb(A.info.size)} МБ`, 'primary', downloadApp)); }
+  else if (A.state === 'downloading') { title = `Скачиваем ${A.info.latest}…`; desc = ''; }
+  else if (A.state === 'ready' || A.state === 'launching') { title = `Версия ${A.info.latest} скачана и проверена`; desc = 'Программа закроется и откроется установщик. Нажмите в нём «Установить».'; actions.push(B(A.state === 'launching' ? 'Запускаем…' : 'Установить и перезапустить', 'primary', launchApp, A.state === 'launching')); }
+  else actions.push(cool ? coolBtn('app') : B('Проверить обновления', 'ghost', () => checkApp()));
+  const kids = [h('b', {}, title)];
+  if (desc) kids.push(h('p', { class: 'upd-notes' }, desc));
+  if (A.state === 'downloading') kids.push(h('div', { class: 'upd-bar' }, h('i')), h('small', { id: 'upd-progress', class: 'upd-progress' }, ''));
+  if (A.err) kids.push(h('p', { class: 'upd-err' }, A.err));
+  if (actions.length) kids.push(h('div', { class: 'row-actions' }, actions));
+  box.replaceChildren(...kids);
+  if (A.state === 'downloading') updateProgress();
+}
+async function initApp() {
+  try { A.version = await invoke('app_version'); } catch (_) {}
+  if (A.version) $('app-version').textContent = A.version;
+  renderAbout();
+  setTimeout(() => checkApp(true), 2500);
+}
+
 render();
 refresh();
+initApp();

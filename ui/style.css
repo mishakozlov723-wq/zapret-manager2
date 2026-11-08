@@ -301,3 +301,9 @@ body[data-busy="auto"] button:disabled{opacity:.75}
 .vrow input{width:16px;height:16px;flex:none;margin:0;accent-color:var(--bad);cursor:inherit}
 .vname{display:flex;flex-direction:column;min-width:0;flex:1}
 .vname small{color:var(--tx3);font-size:12px}
+#settings>.dstatus{margin:0 0 6px}
+#game-mode{height:32px;border-radius:8px;background:rgba(255,255,255,.045);border:1px solid var(--ln2);padding:0 8px;color:var(--tx);font:inherit;outline:none;cursor:pointer}
+#game-mode:focus{border-color:rgba(255,255,255,.4)}
+#game-mode option{background:#1d1d22;color:#fff}
+.preset.on{border-color:color-mix(in srgb,var(--ok) 55%,transparent)}
+.preset-label{color:var(--tx3);font-size:12px;align-self:center}

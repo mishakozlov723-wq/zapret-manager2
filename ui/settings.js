@@ -7,8 +7,17 @@ const FOLDERS = [
   { kind: 'archive', title: 'Старые версии', desc: 'Сюда откладываются прошлые релизы после скачивания новой.' },
   { kind: 'install', title: 'Папка службы', desc: 'Откуда работает служба. Внутри будет создана папка ZapretManager с доступом только для администраторов. Применится при следующем подключении.' },
 ];
-// Domains SoundCloud needs; subdomains (api-v2.soundcloud.com, *.sndcdn.com) are covered automatically.
-const PRESETS = [{ name: 'SoundCloud', domains: ['soundcloud.com', 'sndcdn.com', 'soundcloud.cloud'] }];
+// Ready sets of domains; subdomains (api-v2.soundcloud.com, *.sndcdn.com) are covered automatically.
+const PRESETS = [
+  { name: 'Instagram', domains: ['instagram.com', 'cdninstagram.com', 'ig.me'] },
+  { name: 'Facebook', domains: ['facebook.com', 'fbcdn.net', 'fb.com', 'facebook.net', 'messenger.com'] },
+  { name: 'X (Twitter)', domains: ['x.com', 'twitter.com', 'twimg.com', 't.co'] },
+  { name: 'Telegram', domains: ['telegram.org', 't.me', 'telegram.me', 'telesco.pe', 'cdn-telegram.org'] },
+  { name: 'SoundCloud', domains: ['soundcloud.com', 'sndcdn.com', 'soundcloud.cloud'] },
+  { name: 'LinkedIn', domains: ['linkedin.com', 'licdn.com'] },
+  { name: 'Patreon', domains: ['patreon.com', 'patreonusercontent.com'] },
+  { name: 'Rutracker', domains: ['rutracker.org', 'rutracker.cc'] },
+];
 
 // Re-read on opening the page, but rebuild rows only if something really changed (no lost clicks).
 async function loadSettings() {
@@ -36,7 +45,7 @@ function drawSettings() {
         custom ? h('button', { type: 'button', class: 'ghost lockable', disabled: locked, 'data-reset': f.kind }, icon('rotate-ccw'), 'Сбросить') : null,
         h('button', { type: 'button', class: 'ghost lockable', disabled: locked, 'data-pick': f.kind }, icon('folder-open'), 'Изменить'))));
   }
-  drawDomains();
+  drawDomains(); drawExclude(); drawBypass();
 }
 // One delegated handler on the stable container: a click survives a row redraw.
 $('folders').addEventListener('click', e => {
@@ -67,27 +76,30 @@ function drawDomains() {
   if (!ds.length) list.append(h('span', { class: 'chips-empty', text: 'Пока пусто. Добавьте домен или готовый набор ниже.' }));
   ds.forEach(d => list.append(h('span', { class: 'dchip' }, d,
     h('button', { type: 'button', 'aria-label': `Убрать ${d}`, title: 'Убрать', disabled: ST.saving, onclick: () => saveDomains(ds.filter(x => x !== d)) }, icon('x')))));
+  acts.append(h('span', { class: 'preset-label', text: 'Готовые наборы:' }));
   for (const p of PRESETS) {
-    const missing = p.domains.filter(d => !ds.includes(d));
-    if (missing.length) acts.append(h('button', { type: 'button', class: 'ghost', disabled: ST.saving, onclick: () => saveDomains([...ds, ...missing]) }, icon('plus'), p.name));
+    const missing = p.domains.filter(d => !ds.includes(d)), on = !missing.length;
+    acts.append(h('button', { type: 'button', class: 'ghost preset' + (on ? ' on' : ''), 'aria-pressed': String(on), title: on ? 'Убрать набор' : 'Добавить набор', disabled: ST.saving,
+      onclick: () => saveDomains(on ? ds.filter(d => !p.domains.includes(d)) : [...ds, ...missing]) }, icon(on ? 'check' : 'plus'), p.name));
   }
   drawDomainStatus();
 }
 // Where the list stands relative to the running service.
 function drawDomainStatus() {
-  const ds = ST.data.domains || [];
+  const d = ST.data, ds = d.domains || [];
+  const custom = !!(ds.length || (d.exclude || []).length || (d.game && d.game !== 'off') || d.ipset);
   const connected = S.ov && derive(S.ov).connected;
   const st = $('domain-status');
-  if (connected && !sameList(ST.data.applied || [], ds)) {
+  if (connected && (!sameList(d.applied || [], ds) || d.extra_pending)) {
     st.dataset.tone = 'warn'; st.hidden = false;
-    $('domain-status-text').textContent = 'Список изменён. Служба работает со старым — переподключите стратегию.';
+    $('domain-status-text').textContent = 'Настройки изменены. Служба работает со старыми — переподключите стратегию.';
     const b = $('domain-apply'); b.hidden = false; b.disabled = !!S.busy || ST.saving;
     b.onclick = () => connect(S.ov.manager.strategy);
   } else if (connected) {
-    st.dataset.tone = 'ok'; st.hidden = !ds.length; $('domain-apply').hidden = true;
-    $('domain-status-text').textContent = 'Ваши сайты работают в текущей стратегии.';
+    st.dataset.tone = 'ok'; st.hidden = !custom; $('domain-apply').hidden = true;
+    $('domain-status-text').textContent = 'Ваши настройки работают в текущей стратегии.';
   } else {
-    st.dataset.tone = 'idle'; st.hidden = !ds.length; $('domain-apply').hidden = true;
+    st.dataset.tone = 'idle'; st.hidden = !custom; $('domain-apply').hidden = true;
     $('domain-status-text').textContent = 'Применятся при подключении стратегии.';
   }
 }
@@ -105,6 +117,50 @@ $('domain-form').addEventListener('submit', e => {
   const ds = ST.data?.domains || [];
   saveDomains([...ds, ...parts]).then(() => { if (!$('domain-error').textContent) $('domain-input').value = ''; });
 });
+
+// ---------- exclusions (list-exclude-user.txt)
+function drawExclude() {
+  const list = $('exclude-list'); list.replaceChildren();
+  const ex = ST.data.exclude || [];
+  if (!ex.length) list.append(h('span', { class: 'chips-empty', text: 'Пока пусто.' }));
+  ex.forEach(d => list.append(h('span', { class: 'dchip' }, d,
+    h('button', { type: 'button', 'aria-label': `Убрать ${d}`, title: 'Убрать', disabled: ST.saving, onclick: () => saveExclude(ex.filter(x => x !== d)) }, icon('x')))));
+}
+async function saveExclude(next) {
+  if (ST.saving) return;
+  ST.saving = true; $('exclude-error').textContent = '';
+  try { ST.data = await invoke('save_exclude', { domains: next }); }
+  catch (e) { $('exclude-error').textContent = String(e); }
+  finally { ST.saving = false; drawSettings(true); }
+}
+$('exclude-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const parts = $('exclude-input').value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  if (!parts.length) { $('exclude-error').textContent = 'Введите домен, например sberbank.ru.'; return; }
+  const ex = ST.data?.exclude || [];
+  saveExclude([...ex, ...parts]).then(() => { if (!$('exclude-error').textContent) $('exclude-input').value = ''; });
+});
+
+// ---------- game mode and IP list
+let ipBusy = false;
+function drawBypass() {
+  const g = $('game-mode'); g.value = ST.data.game || 'off'; g.disabled = ST.saving;
+  const ip = ST.data.ipset, why = 'Список адресов от Flowseal (Cloudflare, игровые серверы): помогает, когда сайт или игра блокируются по IP.';
+  $('ipset-info').textContent = ip ? `Включён: ${Number(ip.count).toLocaleString('ru-RU')} адресов, обновлён ${new Date(ip.time * 1000).toLocaleDateString('ru-RU')}. ${why}` : `Выключен. ${why}`;
+  $('ipset-label').textContent = ipBusy ? 'Загружаем…' : ip ? 'Обновить' : 'Загрузить';
+  $('ipset-update').disabled = $('ipset-off').disabled = ST.saving || ipBusy;
+  $('ipset-off').hidden = !ip;
+}
+async function bypassCall(cmd, args, okText) {
+  if (ST.saving) return;
+  ST.saving = true; drawBypass();
+  try { ST.data = await invoke(cmd, args); if (okText) toast(okText, 'ok'); }
+  catch (e) { toast(errText(e), 'bad'); }
+  finally { ST.saving = false; ipBusy = false; drawSettings(true); }
+}
+$('game-mode').addEventListener('change', e => bypassCall('set_game', { mode: e.target.value }, e.target.value === 'off' ? 'Игровой режим выключен.' : 'Игровой режим включён.'));
+$('ipset-update').addEventListener('click', () => { ipBusy = true; bypassCall('update_ipset', {}, 'Список IP загружен.'); });
+$('ipset-off').addEventListener('click', () => bypassCall('clear_ipset', {}, 'Список IP выключен.'));
 
 // ---------- in-app folder picker
 const PK = { f: null, path: null, back: null, seq: 0, loading: false, creating: false };

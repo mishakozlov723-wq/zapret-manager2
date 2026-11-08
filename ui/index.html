@@ -26,7 +26,7 @@
     <div class="sidestatus" id="side-status" data-tone="idle" role="status" aria-live="polite">
       <i aria-hidden="true"></i><div><b id="side-title">Проверяем…</b><small id="side-detail"></small></div>
     </div>
-    <div class="sidefoot">Версия <b id="app-version">0.3.6</b></div>
+    <div class="sidefoot">Версия <b id="app-version">0.3.7</b></div>
   </aside>
 
   <main>
@@ -52,6 +52,7 @@
           <i class="dot" aria-hidden="true"></i>
           <div class="statusbar-text"><b id="sb-title"></b><small id="sb-detail"></small></div>
           <label class="switch" id="autostart-switch"><input type="checkbox" id="autostart"><span aria-hidden="true"></span><b id="autostart-label">Запуск с Windows</b></label>
+          <button class="ghost" id="autopick" type="button" title="Проверим стратегии по очереди и оставим первую, с которой открываются YouTube и Discord"><span data-icon="search" aria-hidden="true"></span>Подобрать за меня</button>
           <button class="ghost danger" id="disconnect" type="button">Отключить</button>
         </div>
         <div id="strategy-groups"></div>
@@ -91,9 +92,24 @@
     </section>
 
     <section class="page" id="settings" hidden>
-      <header><div><h1>Настройки</h1><p>Папки Zapret и ваши сайты.</p></div></header>
+      <header><div><h1>Настройки</h1><p>Папки Zapret, ваши сайты и режимы обхода.</p></div></header>
+      <div class="dstatus" id="domain-status" data-tone="idle" role="status" aria-live="polite" hidden>
+          <i class="dot" aria-hidden="true"></i><span id="domain-status-text"></span>
+          <button class="primary" id="domain-apply" type="button" hidden>Переподключить</button>
+      </div>
       <div class="group-title">Папки</div>
       <div class="panel rows" id="folders"></div>
+      <div class="group-title">Обход</div>
+      <div class="panel rows" id="bypass">
+        <div class="row folder">
+          <div class="folder-info"><div class="folder-title"><span data-icon="layout-grid" aria-hidden="true"></span><b>Игровой режим</b></div><small>Обход для игр и голосовой связи в них: все порты 1024–65535. Включайте, только если не работают игры — может замедлить остальное.</small></div>
+          <div class="folder-actions"><label class="sr-only" for="game-mode">Игровой режим</label><select id="game-mode"><option value="off">Выключен</option><option value="all">TCP и UDP</option><option value="tcp">Только TCP</option><option value="udp">Только UDP</option></select></div>
+        </div>
+        <div class="row folder">
+          <div class="folder-info"><div class="folder-title"><span data-icon="globe" aria-hidden="true"></span><b>Список IP-адресов</b></div><small id="ipset-info">—</small></div>
+          <div class="folder-actions"><button class="ghost" id="ipset-off" type="button" hidden><span data-icon="x" aria-hidden="true"></span>Выключить</button><button class="ghost" id="ipset-update" type="button"><span data-icon="download" aria-hidden="true"></span><span id="ipset-label">Загрузить</span></button></div>
+        </div>
+      </div>
       <div class="group-title">Свои сайты</div>
       <div class="panel domains">
         <p class="hint">Попадут в list-general-user.txt. При скачивании новой версии её список остаётся свежим, а ваши сайты добавляются к нему.</p>
@@ -105,17 +121,24 @@
         <p class="form-error" id="domain-error" role="alert"></p>
         <div class="chips" id="domain-list"></div>
         <div class="row-actions" id="domain-actions"></div>
-        <div class="dstatus" id="domain-status" data-tone="idle" role="status" aria-live="polite" hidden>
-          <i class="dot" aria-hidden="true"></i><span id="domain-status-text"></span>
-          <button class="primary" id="domain-apply" type="button" hidden>Переподключить</button>
-        </div>
+      </div>
+      <div class="group-title">Исключения</div>
+      <div class="panel domains">
+        <p class="hint">Сайты, которые Zapret никогда не будет трогать — например, если с обходом перестал работать банк или игра. Попадут в list-exclude-user.txt.</p>
+        <form class="domain-add" id="exclude-form">
+          <label class="sr-only" for="exclude-input">Домен</label>
+          <input id="exclude-input" placeholder="sberbank.ru" maxlength="253" autocomplete="off">
+          <button class="primary" type="submit">Добавить</button>
+        </form>
+        <p class="form-error" id="exclude-error" role="alert"></p>
+        <div class="chips" id="exclude-list"></div>
       </div>
     </section>
 
     <section class="page" id="about" hidden>
       <header><div><h1>О программе</h1><p>Независимый менеджер для Zapret.</p></div></header>
       <div class="panel about">
-        <b id="about-version">Zapret Manager 0.3.6</b>
+        <b id="about-version">Zapret Manager 0.3.7</b>
         <p>Основан на zapret-discord-youtube от Flowseal и Zapret от bol-van. Не является официальным приложением Flowseal.</p>
         <p>Исходный проект: github.com/Flowseal/zapret-discord-youtube</p>
       </div>

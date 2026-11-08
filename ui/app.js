@@ -2,7 +2,7 @@
 // Zapret Manager UI. One state snapshot (overview) drives every page; actions run one at a time.
 const $ = id => document.getElementById(id);
 const invoke = (name, args) => window.__TAURI__?.core.invoke(name, args) ?? Promise.reject(new Error('Запустите приложение Windows.'));
-const S = { ov: null, err: null, list: null, listErr: null, listTag: null, busy: null, release: null, seq: 0, checkedAt: null, lastKey: '', cool: {} };
+const S = { ov: null, err: null, list: null, listErr: null, listTag: null, busy: null, release: null, seq: 0, checkedAt: null, lastKey: '', cool: {}, pick: '', broken: null, fails: 0 };
 
 function h(tag, props = {}, ...kids) {
   const el = document.createElement(tag);
@@ -149,9 +149,49 @@ const checkUpdate = () => run('update', async () => {
 });
 const connect = name => run('connect:' + name, async () => {
   await invoke('strategy_action', { action: 'connect', name });
+  S.broken = null; S.fails = 0;
   toast(`Включено: ${base(name)}. Проверьте YouTube и Discord; не работает — переключите стратегию.`, 'ok', { label: 'Проверить сайты', fn: () => { go('checks'); $('test').click(); } });
 }, true);
-const disconnect = () => run('disconnect', async () => { await invoke('strategy_action', { action: 'disconnect', name: null }); toast('Обход выключен.', 'ok'); }, true);
+const disconnect = () => run('disconnect', async () => { await invoke('strategy_action', { action: 'disconnect', name: null }); S.broken = null; toast('Обход выключен.', 'ok'); }, true);
+// Auto-pick: one admin prompt, strategies are tried one by one until YouTube and Discord open.
+const autopick = () => run('autopick', async () => {
+  S.pick = '';
+  const timer = setInterval(async () => {
+    try {
+      const [step, name] = String(await invoke('pick_progress')).split('|');
+      const next = name && step !== 'ok' ? `Пробуем ${base(name)} · ${step}` : '';
+      if (next && next !== S.pick) { S.pick = next; render(); }
+    } catch (_) {}
+  }, 700);
+  try {
+    const name = await invoke('strategy_action', { action: 'autopick', name: null });
+    S.broken = null; S.fails = 0;
+    toast(name && name !== 'Готово' ? `Подобрана ${base(name)}: YouTube и Discord открываются.` : 'Стратегия подобрана.', 'ok');
+  } finally { clearInterval(timer); S.pick = ''; }
+}, true);
+
+// ---------- watch: while connected, quietly check every 10 minutes that YouTube and Discord still open.
+let watching = false;
+async function watchAccess() {
+  if (watching || S.busy || !S.ov) return;
+  if (!derive(S.ov).connected) { S.fails = 0; if (S.broken) { S.broken = null; render(); } return; }
+  watching = true;
+  try {
+    const r = await invoke('check_access');
+    if (S.busy || !S.ov || !derive(S.ov).connected) return;
+    const bad = [['YouTube', r.youtube], ['Discord', r.discord]].filter(([, ok]) => !ok).map(([n]) => n);
+    if (!bad.length) { S.fails = 0; if (S.broken) { S.broken = null; render(); } return; }
+    // One miss can be a network hiccup: re-check in a minute, warn only on the second miss in a row.
+    if (++S.fails < 2) { setTimeout(watchAccess, 60 * 1000); return; }
+    const strategy = S.ov.manager.strategy;
+    if (!S.broken || S.broken.strategy !== strategy || S.broken.sites.join() !== bad.join()) {
+      S.broken = { strategy, sites: bad }; render();
+      toast(`${bad.join(' и ')} ${bad.length > 1 ? 'перестали' : 'перестал'} открываться. Подберём другую стратегию?`, 'bad', { label: 'Подобрать', fn: autopick });
+    }
+  } catch (_) {} finally { watching = false; }
+}
+setInterval(watchAccess, 10 * 60 * 1000);
+setTimeout(watchAccess, 30 * 1000);
 
 // ---------- navigation
 function go(page) {
@@ -172,7 +212,7 @@ function render() {
   // A background re-check must not rebuild buttons under the cursor: the "checking" flag only matters
   // before the first snapshot exists; afterwards redraw only when the data really changed.
   // Each section redraws only from its own inputs, so a late strategy list does not rebuild home buttons mid-click.
-  const homeKey = JSON.stringify([S.ov, S.err, S.busy, S.release, !S.ov && !!S.seq, !!coolLeft('zapret')]);
+  const homeKey = JSON.stringify([S.ov, S.err, S.busy, S.release, !S.ov && !!S.seq, !!coolLeft('zapret'), S.pick, S.broken]);
   const strat = JSON.stringify([homeKey, S.list, S.listErr]);
   if (homeKey !== S.lastKey) { S.lastKey = homeKey; renderHome(); renderSide(); renderVersions(); }
   if (strat !== S.lastStratKey) { S.lastStratKey = strat; renderStrategies(); }
@@ -208,6 +248,7 @@ function renderHome() {
     if (apps.length) alert('warn', `Может мешать: ${apps.map(appName).join(', ')}`, 'Включён VPN или похожая программа, она перехватывает тот же трафик. Если Zapret не работает — выключите её. Если всё работает, предупреждение можно скрыть.', { label: 'Скрыть', fn: () => hideApps(apps) });
     if (ov.proxy) alert('warn', 'Включён системный прокси', 'Если вы им не пользуетесь, выключите: Параметры → Сеть и Интернет → Прокси.');
     if (ov.timestamps === false) alert('info', 'TCP timestamps выключены', 'Включим автоматически при подключении стратегии.');
+    if (S.broken && derive(ov).connected) alert('bad', `Стратегия перестала работать: ${S.broken.sites.join(' и ')} не ${S.broken.sites.length > 1 ? 'открываются' : 'открывается'}`, `Сейчас включена ${base(S.broken.strategy)}. Провайдер мог изменить блокировку — подберём другую стратегию автоматически.`, { label: 'Подобрать заново', fn: autopick });
   }
   const alertsKey = [...fresh.childNodes].map(n => n.dataset.tone + n.textContent).join('|');
   if (alerts.dataset.key !== alertsKey) { alerts.dataset.key = alertsKey; alerts.replaceChildren(fresh); }
@@ -238,7 +279,7 @@ function renderHome() {
 
   if (!d.ready) step(4, 'locked', 'Включить стратегию', 'Станет доступно после шагов 2 и 3.');
   else if (d.connected) step(4, 'done', 'Включить стратегию', `Работает ${base(ov.manager.strategy)}. Если YouTube не открывается, переключите стратегию.`, [btn({ label: 'Стратегии', onclick: () => go('strategies') })]);
-  else step(4, 'current', 'Включить стратегию', 'Начните с general. Не заработало — включите следующую.', [btn({ label: 'Выбрать стратегию', cls: 'primary', onclick: () => go('strategies') })]);
+  else step(4, 'current', 'Включить стратегию', 'Начните с general. Не заработало — включите следующую.', [btn({ label: 'Выбрать стратегию', cls: 'primary', onclick: () => go('strategies') }), btn({ label: 'Подобрать за меня', key: 'autopick', busyLabel: 'Подбираем…', onclick: autopick })]);
 }
 
 function renderStrategies() {
@@ -250,14 +291,14 @@ function renderStrategies() {
   if (!S.list) return lock(S.listErr ? 'Не удалось прочитать стратегии' : 'Загружаем стратегии…', S.listErr || '');
   $('strategy-locked').hidden = true; $('strategy-body').hidden = false;
 
-  const connecting = S.busy?.startsWith('connect:'), stopping = S.busy === 'disconnect', autoBusy = S.busy === 'auto';
-  const live = d.connected && !connecting && !stopping;
+  const connecting = S.busy?.startsWith('connect:'), stopping = S.busy === 'disconnect', autoBusy = S.busy === 'auto', picking = S.busy === 'autopick';
+  const live = d.connected && !connecting && !stopping && !picking;
   const bar = $('statusbar');
   if (live && S.wasLive === false) flash(bar, 'celebrate');
   S.wasLive = live;
-  setTone(bar, live ? 'ok' : connecting ? 'info' : 'idle', connecting || stopping);
-  $('sb-title').textContent = connecting ? 'Подключаем…' : stopping ? 'Отключаем…' : d.connected ? 'Подключено' : 'Отключено';
-  $('sb-detail').textContent = connecting ? `${base(S.busy.slice(8))} · подтвердите запрос Windows` : autoBusy ? `${base(m.strategy)} · ${S.autoTarget ? 'включаем' : 'выключаем'} автозапуск…` : d.connected ? `${base(m.strategy)} · Zapret ${d.downloaded}${m.automatic ? ' · запускается с Windows' : ''}` : `Zapret ${d.downloaded} · выберите стратегию ниже`;
+  setTone(bar, live ? 'ok' : connecting || picking ? 'info' : 'idle', connecting || stopping || picking);
+  $('sb-title').textContent = picking ? 'Подбираем стратегию…' : connecting ? 'Подключаем…' : stopping ? 'Отключаем…' : d.connected ? 'Подключено' : 'Отключено';
+  $('sb-detail').textContent = picking ? (S.pick || 'Подтвердите запрос Windows. Проверим стратегии по очереди — до пары минут.') : connecting ? `${base(S.busy.slice(8))} · подтвердите запрос Windows` : autoBusy ? `${base(m.strategy)} · ${S.autoTarget ? 'включаем' : 'выключаем'} автозапуск…` : d.connected ? `${base(m.strategy)} · Zapret ${d.downloaded}${m.automatic ? ' · запускается с Windows' : ''}` : `Zapret ${d.downloaded} · выберите стратегию ниже`;
   // Autostart: the switch moves right away, a spinner sits in the knob while Windows applies it,
   // then the knob pops (success) or the switch shakes back (error).
   // Disconnected: the switch shows the remembered choice, applied on the next connect.
@@ -274,6 +315,7 @@ function renderStrategies() {
     flash(sw, ok ? (now ? 'pop-on' : 'pop-off') : 'shake', 900);
   }
   const dis = $('disconnect'); dis.disabled = !d.connected || !!S.busy;
+  $('autopick').disabled = !!S.busy;
 
   const groups = $('strategy-groups');
   // Preserve cards and buttons across status updates, including keyboard focus.
@@ -312,6 +354,7 @@ function renderStrategies() {
   }
 }
 $('disconnect').addEventListener('click', disconnect);
+$('autopick').addEventListener('click', autopick);
 $('autostart').addEventListener('change', e => {
   const on = e.target.checked;
   S.autoTarget = on;

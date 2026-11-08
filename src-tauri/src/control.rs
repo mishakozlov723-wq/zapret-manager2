@@ -37,7 +37,8 @@ fn strategy_arguments(data:&[u8],root:&str,name:&str,dest:&Path)->Result<String,
  let raw=lines.join(" ");if raw.contains(['\r','\n','&','|','<','>'])||raw.matches('"').count()%2!=0{return Err("Неподдерживаемые параметры стратегии".into())}
  let root=dest.to_string_lossy().to_string();if root.contains(['"','\r','\n','%']){return Err("Недопустимый путь установки".into())}
  let bin=format!("{}\\bin\\",root);let lists=format!("{}\\lists\\",root);
- let args=raw.replace("%BIN%",&bin).replace("%LISTS%",&lists).replace("%GameFilterTCP%","12").replace("%GameFilterUDP%","12");
+ let (gt,gu)=super::settings::game_ports(&super::settings::load());
+ let args=raw.replace("%BIN%",&bin).replace("%LISTS%",&lists).replace("%GameFilterTCP%",gt).replace("%GameFilterUDP%",gu);
  if args.contains('%'){return Err("Эта стратегия использует неподдерживаемые настройки".into())}Ok(args)
 }
 #[tauri::command]
@@ -78,7 +79,7 @@ pub(crate) fn powershell(script:&str,elevated:bool)->Result<String,String>{
  let result=cmd.creation_flags(0x08000000).output().map_err(|e|e.to_string())?;
  if result.status.success(){return Ok(String::from_utf8_lossy(&result.stdout).trim().to_string())}
  if std::env::var("ZAPRET_SERVICE_TEST").as_deref()==Ok("1") { eprintln!("PowerShell status {:?}; stderr: {}; stdout: {}",result.status.code(),String::from_utf8_lossy(&result.stderr),String::from_utf8_lossy(&result.stdout)); }
- Err(match result.status.code(){Some(10)=>"Старый Zapret ещё запущен или включён его автозапуск. Сначала отключи старую службу на главной.",Some(11)=>"Обнаружен другой работающий winws. Останови его вручную, затем повтори.",Some(12)=>"Найдена чужая служба с именем менеджера. Ничего не изменено.",Some(13)=>"Ошибка проверки официального архива или защищённой папки.",Some(14)=>"Служба не запустилась. Проверь, не мешают ли другие программы или антивирус.",Some(15)=>"Сначала выбери стратегию и подключи её.",Some(16)=>"Антивирус удалил или заблокировал файлы Zapret (winws.exe). Добавьте папку службы из Настроек в исключения антивируса и нажмите «Подключить» ещё раз.",Some(90)=>"Подтверждение администратора отменено или не получено.",_=>"Windows не смогла выполнить операцию. Проверь состояние службы."}.into())
+ Err(match result.status.code(){Some(10)=>"Старый Zapret ещё запущен или включён его автозапуск. Сначала отключи старую службу на главной.",Some(11)=>"Обнаружен другой работающий winws. Останови его вручную, затем повтори.",Some(12)=>"Найдена чужая служба с именем менеджера. Ничего не изменено.",Some(13)=>"Ошибка проверки официального архива или защищённой папки.",Some(14)=>"Служба не запустилась. Проверь, не мешают ли другие программы или антивирус.",Some(15)=>"Сначала выбери стратегию и подключи её.",Some(17)=>"Ни одна стратегия не открыла YouTube и Discord. Проверьте предупреждения на главной (DNS, VPN) или выберите стратегию вручную.",Some(16)=>"Антивирус удалил или заблокировал файлы Zapret (winws.exe). Добавьте папку службы из Настроек в исключения антивируса и нажмите «Подключить» ещё раз.",Some(90)=>"Подтверждение администратора отменено или не получено.",_=>"Windows не смогла выполнить операцию. Проверь состояние службы."}.into())
 }
 #[cfg(windows)]
 fn run_action(action:&str,name:Option<String>)->Result<String,String>{
@@ -95,18 +96,39 @@ fn run_action(action:&str,name:Option<String>)->Result<String,String>{
   let mut s=super::settings::load();
   if s.autostart.is_none(){if let Ok((_,auto))=service_state(){s.autostart=Some(auto);let _=super::settings::save(&s);}}
  }
- if action=="connect" {
-  let (zip,tag,data)=load_archive()?;let hash=official_hash(&zip,&tag,&data)?;let (root,names)=archive_scripts(&data)?;let name=name.ok_or("Выбери стратегию")?;if !names.contains(&name){return Err("Стратегия не найдена".into())}
-  let s=super::settings::load();domains=super::settings::clean_domains(&s.domains)?;
-  let base=super::settings::install_base()?;let dest=base.join(&hash).join(&root);let args=strategy_arguments(&data,&root,&name,&dest)?;
+ let mut extra=String::new();
+ if action=="connect"||action=="autopick" {
+  let (zip,tag,data)=load_archive()?;let hash=official_hash(&zip,&tag,&data)?;let (root,names)=archive_scripts(&data)?;
+  let s=super::settings::load();domains=super::settings::clean_domains(&s.domains)?;let exclude=super::settings::clean_domains(&s.exclude)?;
+  let base=super::settings::install_base()?;let dest=base.join(&hash).join(&root);
   // Default base is handled inside the script; only a custom folder is passed (and re-validated there).
   let custom=s.install.as_ref().map(|_|base.to_string_lossy().to_string());
-  payload=serde_json::json!({"action":action,"source":zip.to_string_lossy(),"sha":hash,"root":root,"strategy":name,"args":args,"base":custom,"domains":domains,"auto":s.autostart});
+  let ipset=super::settings::ipset_file().ok().filter(|p|p.is_file()).map(|p|p.to_string_lossy().to_string());
+  extra=super::settings::extra_key(&s);
+  if action=="connect" {
+   let name=name.ok_or("Выбери стратегию")?;if !names.contains(&name){return Err("Стратегия не найдена".into())}
+   let args=strategy_arguments(&data,&root,&name,&dest)?;
+   payload=serde_json::json!({"action":action,"source":zip.to_string_lossy(),"sha":hash,"root":root,"strategy":name,"args":args,"base":custom,"domains":domains,"exclude":exclude,"ipset":ipset,"auto":s.autostart});
+  } else {
+   // Plain general first, then the ALT variants. The list is too long for a command line, so it goes
+   // through a file whose SHA-256 the elevated script checks before using it.
+   let mut order=names.clone();order.sort_by_key(|n|n.contains('('));
+   let list:Vec<serde_json::Value>=order.iter().filter_map(|n|strategy_arguments(&data,&root,n,&dest).ok().map(|a|serde_json::json!({"name":n,"args":a}))).collect();
+   if list.is_empty(){return Err("Нет подходящих стратегий".into())}
+   let body=serde_json::to_vec(&serde_json::json!({"items":list})).map_err(|e|e.to_string())?;
+   let list_file=super::settings::data_path("pick-list.json")?;fs::write(&list_file,&body).map_err(|e|e.to_string())?;
+   let progress=super::settings::data_path("pick-progress.txt")?;let _=fs::write(&progress,"");
+   payload=serde_json::json!({"action":action,"source":zip.to_string_lossy(),"sha":hash,"root":root,"strategy":"","args":"","list":list_file.to_string_lossy(),"listsha":format!("{:x}",Sha256::digest(&body)),"progress":progress.to_string_lossy(),"base":custom,"domains":domains,"exclude":exclude,"ipset":ipset,"auto":s.autostart});
+  }
  }
  let payload=STANDARD.encode(serde_json::to_vec(&payload).map_err(|e|e.to_string())?);
  let script=include_str!("control.ps1").replace("__PAYLOAD__",&payload);
  powershell(&script,true)?;
- if action=="connect" {super::settings::mark_applied(&domains);}
+ if action=="connect"||action=="autopick" {super::settings::mark_applied(&domains,&extra);}
+ if action=="autopick" {
+  let text=super::settings::data_path("pick-progress.txt").ok().and_then(|p|fs::read_to_string(p).ok()).unwrap_or_default();
+  if let Some(n)=text.trim().strip_prefix("ok|"){return Ok(n.to_string())}
+ }
  if action=="auto_on"||action=="auto_off" {let mut s=super::settings::load();s.autostart=Some(action=="auto_on");let _=super::settings::save(&s);}
  Ok("Готово".into())
 }
@@ -130,12 +152,31 @@ pub(crate) fn cleanup(shas:&[String])->Result<(),String>{
 }
 #[tauri::command]
 pub async fn strategy_action(action:String,name:Option<String>)->Result<String,String>{
- if !["connect","disconnect","auto_on","auto_off","kill_foreign"].contains(&action.as_str()){return Err("Неизвестное действие".into())}
+ if !["connect","autopick","disconnect","auto_on","auto_off","kill_foreign"].contains(&action.as_str()){return Err("Неизвестное действие".into())}
  tauri::async_runtime::spawn_blocking(move||{
   #[cfg(windows)] {run_action(&action,name)}
   #[cfg(not(windows))] {let _=(action,name);Err("Доступно только в Windows".into())}
  }).await.map_err(|e|e.to_string())?
 }
+/// "3/19|general (ALT2).bat" while auto-pick runs, "ok|name" when it found one.
+#[tauri::command]
+pub async fn pick_progress()->Result<String,String>{tauri::async_runtime::spawn_blocking(||->Result<String,String>{
+ Ok(super::settings::data_path("pick-progress.txt").ok().and_then(|p|fs::read_to_string(p).ok()).unwrap_or_default())
+}).await.map_err(|e|e.to_string())?}
+
+// Any HTTP answer means the site is reachable; only a failed connection (DPI cut it) counts as blocked.
+fn reachable(agent:&ureq::Agent,url:&str)->bool{
+ match agent.get(url).set("User-Agent","Mozilla/5.0").call(){Ok(_)=>true,Err(ureq::Error::Status(_,_))=>true,Err(_)=>false}
+}
+/// Quiet background check while connected: do YouTube (site and video servers) and Discord still open?
+#[tauri::command]
+pub async fn check_access()->Result<serde_json::Value,String>{tauri::async_runtime::spawn_blocking(||->Result<serde_json::Value,String>{
+ let agent=super::https_agent(Duration::from_secs(8))?;
+ let yt=reachable(&agent,"https://www.youtube.com/generate_204")&&reachable(&agent,"https://redirector.googlevideo.com/report_mapping");
+ let dc=reachable(&agent,"https://discord.com/api/v9/gateway");
+ Ok(serde_json::json!({"youtube":yt,"discord":dc}))
+}).await.map_err(|e|e.to_string())?}
+
 #[tauri::command]
 pub async fn strategy_status()->Result<serde_json::Value,String>{tauri::async_runtime::spawn_blocking(||{
  #[cfg(windows)] {

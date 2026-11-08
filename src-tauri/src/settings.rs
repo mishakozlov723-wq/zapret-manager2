@@ -17,6 +17,12 @@ pub struct Settings {
     pub applied: Option<Vec<String>>,
     /// Start with Windows: the user's choice, kept while disconnected and applied on connect.
     pub autostart: Option<bool>,
+    /// Sites winws must never touch (list-exclude-user.txt).
+    pub exclude: Vec<String>,
+    /// Game mode: "all" | "tcp" | "udp"; None = off.
+    pub game: Option<String>,
+    /// Exclusions, game mode and IP list as they were on the last successful connect.
+    pub applied_extra: Option<String>,
 }
 
 fn data_dir() -> Result<PathBuf, String> {
@@ -112,7 +118,11 @@ pub fn move_versions(from: &Path, to: &Path, keep: Option<&str>) -> Result<usize
 }
 fn view() -> Result<serde_json::Value, String> {
     let s = load();
+    let extra_pending = s.applied_extra.clone().unwrap_or_else(|| "|off|off".into()) != extra_key(&s);
+    let ipset = ipset_info().map(|(n, t)| serde_json::json!({"count": n, "time": t}));
+    let game = s.game.clone().unwrap_or_else(|| "off".into());
     Ok(serde_json::json!({
+        "exclude": s.exclude, "game": game, "ipset": ipset, "extra_pending": extra_pending,
         "downloads": downloads_dir()?.display().to_string(), "downloads_custom": s.downloads.is_some(),
         "archive": archive_dir()?.display().to_string(), "archive_custom": s.archive.is_some(),
         "install": install_base()?.display().to_string(), "install_custom": s.install.is_some(),
@@ -179,7 +189,111 @@ pub async fn save_domains(domains: Vec<String>) -> Result<serde_json::Value, Str
         let mut s = load(); s.domains = clean_domains(&domains)?; save(&s)?; view()
     }).await.map_err(|e| e.to_string())?
 }
-pub fn mark_applied(domains: &[String]) { let mut s = load(); s.applied = Some(domains.to_vec()); let _ = save(&s); }
+pub fn mark_applied(domains: &[String], extra: &str) { let mut s = load(); s.applied = Some(domains.to_vec()); s.applied_extra = Some(extra.to_string()); let _ = save(&s); }
+
+pub fn data_path(name: &str) -> Result<PathBuf, String> {
+    let dir = data_dir()?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку данных: {e}"))?;
+    Ok(dir.join(name))
+}
+pub fn ipset_file() -> Result<PathBuf, String> { Ok(data_dir()?.join("ipset-all.txt")) }
+/// (addresses, unix time) of the downloaded IP list, if there is one.
+fn ipset_info() -> Option<(usize, u64)> {
+    let p = ipset_file().ok()?;
+    let meta = fs::metadata(&p).ok()?;
+    let text = fs::read_to_string(&p).ok()?;
+    let n = text.lines().filter(|l| !l.trim().is_empty()).count();
+    let t = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some((n, t))
+}
+/// Ports for %GameFilterTCP% / %GameFilterUDP%: all high ports in game mode, otherwise the official "off" value 12.
+pub fn game_ports(s: &Settings) -> (&'static str, &'static str) {
+    const ALL: &str = "1024-65535";
+    match s.game.as_deref() { Some("all") => (ALL, ALL), Some("tcp") => (ALL, "12"), Some("udp") => ("12", ALL), _ => ("12", "12") }
+}
+/// Fingerprint of everything besides own sites that the running service was started with.
+pub fn extra_key(s: &Settings) -> String {
+    let mut ex = s.exclude.clone(); ex.sort();
+    let ip = ipset_info().map(|(n, t)| format!("{n}@{t}")).unwrap_or_else(|| "off".into());
+    format!("{}|{}|{}", ex.join(","), s.game.as_deref().unwrap_or("off"), ip)
+}
+#[tauri::command]
+pub async fn save_exclude(domains: Vec<String>) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = load(); s.exclude = clean_domains(&domains)?; save(&s)?; view()
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn set_game(mode: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut s = load();
+        s.game = match mode.as_str() { "off" => None, "all" | "tcp" | "udp" => Some(mode.clone()), _ => return Err("Неизвестный режим".to_string()) };
+        save(&s)?; view()
+    }).await.map_err(|e| e.to_string())?
+}
+const IPSET_URL: &str = "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/.service/ipset-service.txt";
+/// One IPv4/IPv6 address or network per line. Returns the cleaned list (CRLF) and its size.
+pub fn checked_ipset(text: &str) -> Result<(String, usize), String> {
+    let mut out: Vec<&str> = Vec::new();
+    for l in text.lines() {
+        let l = l.trim();
+        if l.is_empty() || l.starts_with('#') { continue; }
+        let bad = || format!("Неверная строка в списке IP: {l}");
+        let (ip, pre) = match l.split_once('/') { Some((a, b)) => (a, Some(b)), None => (l, None) };
+        let addr: std::net::IpAddr = ip.parse().map_err(|_| bad())?;
+        if let Some(p) = pre {
+            let p: u8 = p.parse().map_err(|_| bad())?;
+            let max = if addr.is_ipv4() { 32 } else { 128 };
+            if p > max { return Err(bad()); }
+        }
+        out.push(l);
+    }
+    if out.len() < 10 { return Err("Список IP пустой или повреждён".into()); }
+    let n = out.len();
+    Ok((out.join("\r\n") + "\r\n", n))
+}
+#[tauri::command]
+pub async fn update_ipset() -> Result<serde_json::Value, super::net::NetError> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, super::net::NetError> {
+        let agent = super::https_agent(std::time::Duration::from_secs(30))?;
+        let data = super::net::get_bytes(&agent, IPSET_URL, 5 * 1024 * 1024)?;
+        let text = String::from_utf8(data).map_err(|_| "Список IP повреждён".to_string())?;
+        let (clean, _) = checked_ipset(&text)?;
+        let p = data_path("ipset-all.txt")?;
+        let tmp = p.with_extension("tmp");
+        fs::write(&tmp, clean).map_err(|e| format!("Не удалось сохранить список IP: {e}"))?;
+        fs::rename(&tmp, &p).map_err(|e| format!("Не удалось сохранить список IP: {e}"))?;
+        Ok(view()?)
+    }).await.map_err(|e| super::net::NetError::fatal(e.to_string()))?
+}
+#[tauri::command]
+pub async fn clear_ipset() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = ipset_file()?;
+        if p.exists() { fs::remove_file(&p).map_err(|e| format!("Не удалось выключить список IP: {e}"))?; }
+        view()
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+    #[test] fn ipset_validation() {
+        let good: String = (1..=12).map(|i| format!("10.0.{i}.0/24\n")).collect::<String>() + "# comment\n2606:4700::/32\n1.1.1.1\n";
+        let (clean, n) = checked_ipset(&good).unwrap();
+        assert_eq!(n, 14);
+        assert!(!clean.contains('#'));
+        assert!(checked_ipset("<html>").is_err());
+        assert!(checked_ipset(&(good.clone() + "10.0.0.0/33\n")).is_err());
+        assert!(checked_ipset("1.1.1.1\n").is_err());
+    }
+    #[test] fn game_modes() {
+        let mut s = Settings::default();
+        assert_eq!(game_ports(&s), ("12", "12"));
+        s.game = Some("all".into()); assert_eq!(game_ports(&s), ("1024-65535", "1024-65535"));
+        s.game = Some("udp".into()); assert_eq!(game_ports(&s), ("12", "1024-65535"));
+    }
+}
 
 #[cfg(test)]
 mod tests {

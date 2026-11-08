@@ -17,7 +17,7 @@ try {
     # The install folder may have been changed since the service was created, so check ownership and the winws binary only.
     if ($props.ZapretManagerOwner -ne 'RetockerZapretManager' -or $props.ImagePath -notmatch '(?i)^"[a-z]:\\[^"]+\\bin\\winws\.exe"') { exit 12 }
   }
-  if ($p.action -eq 'connect') {
+  if ($p.action -eq 'connect' -or $p.action -eq 'autopick') {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -44,6 +44,17 @@ public static class ZapretServiceNative {
     $other = @(Get-CimInstance Win32_Process -Filter "Name='winws.exe'" | Where-Object { $_.ProcessId -ne $ourPid })
     if ($other.Count -gt 0) { exit 11 }
     if ($p.sha -notmatch '^[a-f0-9]{64}$' -or $p.root -notmatch '^[a-zA-Z0-9._-]+$' -or $p.root -in @('.','..')) { exit 13 }
+    $cands = @()
+    if ($p.action -eq 'autopick') {
+      # Strategy list from the manager: used only if it is exactly the file the manager wrote (SHA-256 from the payload).
+      if ([string]$p.listsha -notmatch '^[a-f0-9]{64}$') { exit 13 }
+      $raw = [IO.File]::ReadAllBytes([string]$p.list)
+      $lh = [Security.Cryptography.SHA256]::Create()
+      try { $got = ([BitConverter]::ToString($lh.ComputeHash($raw))).Replace('-','').ToLowerInvariant() } finally { $lh.Dispose() }
+      if ($got -ne $p.listsha) { exit 13 }
+      $cands = @(([Text.Encoding]::UTF8.GetString($raw) | ConvertFrom-Json).items)
+      if ($cands.Count -eq 0) { exit 13 }
+    }
     New-Item -ItemType Directory -Force -Path $base | Out-Null
     if ($base -ne $defaultBase) {
       # The service runs as SYSTEM: a user-writable folder would let any program swap winws.exe. Lock it like Program Files.
@@ -89,9 +100,70 @@ public static class ZapretServiceNative {
     $userDomains = @($p.domains | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' })
     $userText = if ($userDomains.Count) { ($userDomains -join "`r`n") } else { "# Never leave this file empty`r`ndomain.example.abc" }
     [IO.File]::WriteAllText((Join-Path $folder 'lists\list-general-user.txt'), $userText + "`r`n")
+    # Sites the user never wants touched.
+    $ex = @($p.exclude | Where-Object { $_ -match '^[a-z0-9-]+(\.[a-z0-9-]+)+$' })
+    $exText = if ($ex.Count) { ($ex -join "`r`n") } else { 'domain.example.abc' }
+    [IO.File]::WriteAllText((Join-Path $folder 'lists\list-exclude-user.txt'), $exText + "`r`n")
+    # IP list: the user's downloaded copy, or the release's own file (kept aside the first time).
+    $ipFile = Join-Path $folder 'lists\ipset-all.txt'; $ipStock = Join-Path $folder 'lists\ipset-all.stock.txt'
+    if ((Test-Path $ipFile) -and -not (Test-Path $ipStock)) { Copy-Item -LiteralPath $ipFile -Destination $ipStock }
+    if ($p.ipset) {
+      $ipText = [IO.File]::ReadAllText([string]$p.ipset)
+      if ($ipText.Length -gt 6000000 -or $ipText -notmatch '^[0-9a-fA-F:./\s]+$') { exit 13 }
+      [IO.File]::WriteAllText($ipFile, $ipText)
+    } elseif (Test-Path $ipStock) { Copy-Item -LiteralPath $ipStock -Destination $ipFile -Force }
     $binary='"'+$exe+'" '+$p.args
     # Same as the official service.bat: fooling=ts strategies need TCP timestamps.
     try { $g = (netsh interface tcp show global) -join "`n"; if ($g -notmatch '(?im)1323[^:\r\n]*:\s*enabled') { netsh interface tcp set global timestamps=enabled | Out-Null } } catch {}
+    if ($p.action -eq 'autopick') {
+      # Try strategies one by one and keep the first that opens YouTube (site + video servers) and Discord.
+      function Test-Site([string]$u) {
+        $ErrorActionPreference = 'Continue'
+        $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+        try {
+          if (Test-Path $curl) { $c = & $curl -s -o NUL -m 7 --connect-timeout 5 --ssl-no-revoke -w '%{http_code}' $u; return ([string]$c -match '^[1-5][0-9][0-9]$') }
+          $r = [Net.WebRequest]::Create($u); $r.Timeout = 7000; $r.GetResponse().Close(); return $true
+        } catch { return ($null -ne $_.Exception.Response -or ($_.Exception.InnerException -and $null -ne $_.Exception.InnerException.Response)) }
+      }
+      $targets = @('https://www.youtube.com/generate_204','https://redirector.googlevideo.com/report_mapping','https://discord.com/api/v9/gateway')
+      $oldPath = $null; $oldMode = 3; $wasRunning = $false
+      if ($existing) { $oldPath = $props.ImagePath; $oldMode = [int]$props.Start; $wasRunning = ((Get-Service -Name $serviceName).Status -eq 'Running') }
+      $mode = if ($null -ne $p.auto) { if ($p.auto) {2} else {3} } elseif ($oldMode -eq 2) {2} else {3}
+      if (-not $existing) {
+        New-Service -Name $serviceName -BinaryPathName ('"' + $exe + '" ' + $cands[0].args) -DisplayName 'Zapret Manager' -StartupType Manual | Out-Null
+        New-ItemProperty -LiteralPath $key -Name ZapretManagerOwner -PropertyType String -Value 'RetockerZapretManager' -Force | Out-Null
+      }
+      $found = $null; $i = 0; $n = $cands.Count
+      foreach ($c in $cands) {
+        $i++
+        try { [IO.File]::WriteAllText([string]$p.progress, "$i/$n|$($c.name)") } catch {}
+        if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force; (Get-Service -Name $serviceName).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20)) }
+        [ZapretServiceNative]::Change($serviceName, ('"' + $exe + '" ' + $c.args), 3)
+        try {
+          Start-Service -Name $serviceName
+          (Get-Service -Name $serviceName).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
+          Start-Sleep -Seconds 2
+          if ((Get-Service -Name $serviceName).Status -ne 'Running') { continue }
+        } catch { continue }
+        $ok = $true
+        foreach ($t in $targets) { if (-not (Test-Site $t)) { $ok = $false; break } }
+        if ($ok) { $found = $c; break }
+      }
+      if ($found) {
+        [ZapretServiceNative]::Change($serviceName, ('"' + $exe + '" ' + $found.args), $mode)
+        New-ItemProperty -LiteralPath $key -Name ZapretManagerStrategy -PropertyType String -Value ([string]$found.name) -Force | Out-Null
+        try { [IO.File]::WriteAllText([string]$p.progress, "ok|$($found.name)") } catch {}
+        exit 0
+      }
+      # Nothing worked: put back what was there before.
+      if ((Get-Service -Name $serviceName).Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force; (Get-Service -Name $serviceName).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20)) }
+      if ($oldPath) {
+        $back = if ($oldMode -eq 2) {2} elseif ($oldMode -eq 4) {4} else {3}
+        [ZapretServiceNative]::Change($serviceName, $oldPath, $back)
+        if ($wasRunning -and $back -ne 4) { Start-Service -Name $serviceName -ErrorAction SilentlyContinue }
+      }
+      exit 17
+    }
     $oldPath = $null; $oldMode = $null; $wasRunning=$false
     if ($existing) {
       $oldPath=$props.ImagePath; $oldMode=[int]$props.Start; $wasRunning=((Get-Service -Name $serviceName).Status -eq 'Running')

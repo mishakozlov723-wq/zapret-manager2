@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Zapret-Manager-Setup</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <ApplicationIcon>../src-tauri/icons/icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -24,7 +24,7 @@
     <Resource Include="../src-tauri/icons/128x128.png" Link="Assets/brand.png" />
     <Resource Include="../src-tauri/icons/icon.ico" Link="Assets/icon.ico" />
     <EmbeddedResource Include="../ui/assets/icons/*.svg" LogicalName="Icons.%(Filename).svg" />
-    <EmbeddedResource Include="../src-tauri/target/release/bundle/nsis/Zapret Manager_0.2.0_x64-setup.exe" LogicalName="Payload.setup.exe" />
+    <EmbeddedResource Include="../src-tauri/target/release/bundle/nsis/Zapret Manager_$(Version)_x64-setup.exe" LogicalName="Payload.setup.exe" />
     <EmbeddedResource Include="$(IntermediateOutputPath)app.sha256" LogicalName="Payload.app.sha256" />
     <EmbeddedResource Include="$(IntermediateOutputPath)app.size" LogicalName="Payload.app.size" />
   </ItemGroup>

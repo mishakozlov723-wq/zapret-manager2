@@ -267,3 +267,20 @@ body[data-busy="auto"] button:disabled{opacity:.75}
   .statusbar{flex-wrap:wrap}
   .sidestatus small{max-width:100px}
 }
+
+/* 0.3: GitHub cooldown + in-app updates */
+.cool-wrap{display:inline-flex;flex-direction:column;align-items:flex-start;gap:6px}
+.ghost.cool{cursor:default;color:var(--warn);font-variant-numeric:tabular-nums;opacity:1}
+.ghost.cool::before{content:'';width:11px;height:11px;border-radius:50%;border:2px solid color-mix(in srgb,var(--warn) 30%,transparent);border-top-color:var(--warn);animation:coolSpin 1.2s linear infinite}
+@keyframes coolSpin{to{transform:rotate(360deg)}}
+.cool-hint{color:var(--tx3);font-size:11.5px;font-weight:600;max-width:420px;line-height:1.45;white-space:normal}
+.upd{margin-top:12px}
+.upd-notes{white-space:pre-line;max-height:160px;overflow:auto}
+.about .upd-err{color:var(--bad);font-weight:600}
+.upd-bar{height:6px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:12px}
+.upd-bar i{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--ok),color-mix(in srgb,var(--ok) 55%,#fff),var(--ok));background-size:200% 100%;animation:updShimmer 1.4s linear infinite;transition:width .3s var(--ease)}
+@keyframes updShimmer{to{background-position:-200% 0}}
+.upd-progress{display:block;margin-top:6px;color:var(--tx3);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.nav{position:relative}
+.nav.has-update::after{content:'';position:absolute;right:10px;top:50%;width:7px;height:7px;margin-top:-3.5px;border-radius:50%;background:var(--ok);animation:updDot 2s ease-in-out infinite}
+@keyframes updDot{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}50%{box-shadow:0 0 0 5px transparent}}

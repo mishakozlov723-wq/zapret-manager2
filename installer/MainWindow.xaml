@@ -16,7 +16,7 @@
     </StackPanel>
     <TextBlock DockPanel.Dock="Top" Text="ШАГИ" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource Tx3}" Margin="12,0,0,6"/>
     <StackPanel x:Name="Nav" DockPanel.Dock="Top" AutomationProperties.Name="Шаги установки"/>
-    <TextBlock DockPanel.Dock="Bottom" Margin="12,10,10,0" FontSize="12" Foreground="{StaticResource Tx3}">Версия <Bold>0.3.2</Bold> · Windows x64</TextBlock>
+    <TextBlock DockPanel.Dock="Bottom" Margin="12,10,10,0" FontSize="12" Foreground="{StaticResource Tx3}">Версия <Bold>0.3.3</Bold> · Windows x64</TextBlock>
     <Border DockPanel.Dock="Bottom" Background="{StaticResource Card}" BorderBrush="{StaticResource Ln}" BorderThickness="1" CornerRadius="12" Padding="12,12">
      <DockPanel>
       <ContentControl x:Name="SideDot" VerticalAlignment="Center" Margin="0,0,10,0"/>

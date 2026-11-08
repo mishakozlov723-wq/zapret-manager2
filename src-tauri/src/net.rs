@@ -89,6 +89,35 @@ pub fn get_bytes_progress(agent: &ureq::Agent, url: &str, max: u64, progress: &d
     })
 }
 
+// The address GitHub redirects to (releases/latest -> releases/tag/1.10.4). A normal page, not the API: no hourly limit.
+pub fn final_url(agent: &ureq::Agent, url: &str) -> Result<String, NetError> {
+    retry_loop(|| {
+        let r = agent.get(url).set("User-Agent", UA).call().map_err(classify)?;
+        Ok(r.get_url().to_string())
+    })
+}
+
+pub fn get_text(agent: &ureq::Agent, url: &str) -> Result<String, NetError> {
+    let bytes = get_bytes(agent, url, 4 * 1024 * 1024)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+pub fn tag_from_url(url: &str) -> Option<String> {
+    let rest = url.split("/releases/tag/").nth(1)?;
+    let tag = rest.split(|c: char| c == '/' || c == '?' || c == '#').next()?;
+    if tag.is_empty() { None } else { Some(tag.to_string()) }
+}
+
+// The SHA-256 GitHub shows next to a release file, taken from the release page.
+pub fn digest_after(html: &str, href: &str) -> Option<String> {
+    let start = html.rfind(href)? + href.len();
+    let rest = &html[start..];
+    let part = &rest[..rest.find("/releases/download/").unwrap_or(rest.len())];
+    let i = part.find("sha256:")? + 7;
+    let hex = part.get(i..i + 64)?;
+    if hex.bytes().all(|b| b.is_ascii_hexdigit()) { Some(hex.to_ascii_lowercase()) } else { None }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +142,15 @@ mod tests {
         let r: Result<(), NetError> = retry_loop(|| { calls += 1; Err(NetError::fatal("no")) });
         assert!(r.is_err());
         assert_eq!(calls, 1);
+    }
+    #[test] fn reads_tag_and_digest_from_pages() {
+        assert_eq!(tag_from_url("https://github.com/Flowseal/zapret-discord-youtube/releases/tag/1.10.4").as_deref(), Some("1.10.4"));
+        assert_eq!(tag_from_url("https://github.com/Flowseal/zapret-discord-youtube/releases"), None);
+        let a = "a".repeat(64);
+        let b = "B".repeat(64);
+        let html = format!(r#"<a href="/F/z/releases/download/1.0/x.rar">x</a><span>sha256:{a}</span><a href="/F/z/releases/download/1.0/x.zip">x</a><clipboard-copy value="sha256:{b}">"#);
+        assert_eq!(digest_after(&html, "/releases/download/1.0/x.zip\"").unwrap(), "b".repeat(64));
+        assert_eq!(digest_after(&html, "/releases/download/1.0/x.rar\"").unwrap(), "a".repeat(64));
+        assert!(digest_after(&html, "/releases/download/1.0/y.zip\"").is_none());
     }
 }

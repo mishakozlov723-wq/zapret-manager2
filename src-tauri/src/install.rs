@@ -63,9 +63,10 @@ fn existing_release(base: &Path, tag: &str, digest: &str) -> Option<Installed> {
     }
     None
 }
-fn download_install(base: &Path) -> Result<Installed, NetError> {
-    let agent = super::https_agent(Duration::from_secs(90))?;
-    let json = super::net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
+struct Remote { tag: String, href: String, digest: String, size: Option<u64> }
+
+fn remote_from_api(agent: &ureq::Agent) -> Result<Remote, NetError> {
+    let json = super::net::get_json(agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
     let tag = json["tag_name"].as_str().ok_or("Нет версии релиза")?;
     if !safe_tag(tag) { return Err("Некорректный номер версии".into()); }
     let asset = json["assets"].as_array().ok_or("В релизе нет файлов")?.iter().find(|a| a["name"].as_str().map_or(false, |n| n.starts_with("zapret-discord-youtube-") && n.ends_with(".zip")) && a["state"].as_str() == Some("uploaded")).ok_or("В релизе нет официального ZIP")?;
@@ -75,9 +76,39 @@ fn download_install(base: &Path) -> Result<Installed, NetError> {
     if digest.len()!=64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("Неверная контрольная сумма".into()); }
     let size=asset["size"].as_u64().ok_or("Неизвестный размер архива")?;
     if size == 0 || size > MAX_ZIP { return Err("Недопустимый размер архива".into()); }
-    if let Some(found) = existing_release(base, tag, &digest.to_ascii_lowercase()) { return Ok(found); }
-    let bytes = super::net::get_bytes(&agent, href, MAX_ZIP)?;
-    if bytes.len() as u64 != size || format!("{:x}", Sha256::digest(&bytes)) != digest.to_ascii_lowercase() { return Err("Архив не прошёл проверку размера или SHA-256".into()); }
+    Ok(Remote { tag: tag.to_owned(), href: href.to_owned(), digest: digest.to_ascii_lowercase(), size: Some(size) })
+}
+
+// Normal GitHub pages and file links, not the API: no 60-requests-per-hour limit.
+fn remote_from_web(agent: &ureq::Agent) -> Result<Remote, NetError> {
+    let latest = super::net::final_url(agent, "https://github.com/Flowseal/zapret-discord-youtube/releases/latest")?;
+    let tag = super::net::tag_from_url(&latest).ok_or("Не удалось узнать последнюю версию Zapret")?;
+    if !safe_tag(&tag) { return Err("Некорректный номер версии".into()); }
+    let name = format!("zapret-discord-youtube-{tag}.zip");
+    let href = format!("https://github.com/Flowseal/zapret-discord-youtube/releases/download/{tag}/{name}");
+    if !valid_asset_url(&href, &tag) { return Err("Неожиданный адрес архива".into()); }
+    let html = super::net::get_text(agent, &format!("https://github.com/Flowseal/zapret-discord-youtube/releases/expanded_assets/{tag}"))?;
+    let digest = super::net::digest_after(&html, &format!("/releases/download/{tag}/{name}\"")).ok_or("На странице релиза нет контрольной суммы SHA-256")?;
+    Ok(Remote { tag, href, digest, size: None })
+}
+
+fn find_remote(agent: &ureq::Agent) -> Result<Remote, NetError> {
+    match remote_from_web(agent) {
+        Ok(r) => Ok(r),
+        // GitHub changed the page or shows no checksum: ask the API once.
+        Err(e) if e.kind == "fatal" => remote_from_api(agent),
+        Err(e) => Err(e),
+    }
+}
+
+fn download_install(base: &Path) -> Result<Installed, NetError> {
+    let agent = super::https_agent(Duration::from_secs(90))?;
+    let remote = find_remote(&agent)?;
+    let tag = remote.tag.as_str();
+    let digest = remote.digest.as_str();
+    if let Some(found) = existing_release(base, tag, digest) { return Ok(found); }
+    let bytes = super::net::get_bytes(&agent, &remote.href, MAX_ZIP)?;
+    if remote.size.map_or(false, |s| bytes.len() as u64 != s) || format!("{:x}", Sha256::digest(&bytes)) != digest { return Err("Архив не прошёл проверку размера или SHA-256".into()); }
     fs::create_dir_all(base).map_err(|e| e.to_string())?;
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis();
     let dir=base.join(format!("{tag}-{stamp}")); fs::create_dir(&dir).map_err(|e|format!("Не удалось создать папку: {e}"))?;
@@ -167,6 +198,13 @@ mod tests {
   assert!(again.reused);
   assert_eq!(std::fs::read_dir(&path).unwrap().count(), 1);
   std::fs::remove_dir_all(path).unwrap();
+ }
+ #[test] fn finds_release_without_api() {
+  let agent = crate::https_agent(Duration::from_secs(60)).unwrap();
+  let r = remote_from_web(&agent).expect("tag and sha256 from github.com pages");
+  assert!(safe_tag(&r.tag));
+  assert_eq!(r.digest.len(), 64);
+  assert!(valid_asset_url(&r.href, &r.tag));
  }
  #[test] fn rejects_paths_and_urls() {
   for n in ["../bad", "/absolute", "folder/../bad", "C:/bad", "a\\b", "foo./evil"] {assert!(!safe_zip_name(n),"{n}");}

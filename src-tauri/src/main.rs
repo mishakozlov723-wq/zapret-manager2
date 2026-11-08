@@ -47,8 +47,8 @@ async fn detect() -> Result<Detection, String> {
 async fn latest_release() -> Result<Release, net::NetError> {
     tauri::async_runtime::spawn_blocking(|| -> Result<Release, net::NetError> {
         let agent = https_agent(Duration::from_secs(15))?;
-        let json = net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
-        let tag = json["tag_name"].as_str().ok_or("Нет номера версии")?.to_string();
+        let latest = net::final_url(&agent, "https://github.com/Flowseal/zapret-discord-youtube/releases/latest")?;
+        let tag = net::tag_from_url(&latest).ok_or("Нет номера версии")?;
         Ok(Release { tag, url: "https://github.com/Flowseal/zapret-discord-youtube/releases/latest".into() })
     }).await.map_err(|e| e.to_string())?
 }

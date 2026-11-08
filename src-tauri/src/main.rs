@@ -20,11 +20,6 @@ fn https_agent(timeout: Duration) -> Result<ureq::Agent, String> {
     let connector = native_tls::TlsConnector::new().map_err(|e| format!("Не удалось настроить HTTPS: {e}"))?;
     Ok(ureq::AgentBuilder::new().tls_connector(Arc::new(connector)).timeout(timeout).build())
 }
-// For large downloads: no overall deadline, but give up when the connection stalls.
-fn stream_agent() -> Result<ureq::Agent, String> {
-    let connector = native_tls::TlsConnector::new().map_err(|e| format!("Не удалось настроить HTTPS: {e}"))?;
-    Ok(ureq::AgentBuilder::new().tls_connector(Arc::new(connector)).timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(30)).build())
-}
 
 // Detection is deliberately read-only: no process is stopped, no service is changed.
 #[tauri::command]
@@ -52,14 +47,10 @@ async fn detect() -> Result<Detection, String> {
 async fn latest_release() -> Result<Release, net::NetError> {
     tauri::async_runtime::spawn_blocking(|| -> Result<Release, net::NetError> {
         let agent = https_agent(Duration::from_secs(15))?;
-        let tag = match net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest", "проверка версии Zapret") {
-            Ok(json) => json["tag_name"].as_str().ok_or("Нет номера версии")?.to_string(),
-            // API limit hit or API down: read the tag from the github.com redirect instead.
-            Err(e) if e.kind != "fatal" => net::latest_tag_web(&agent, "Flowseal/zapret-discord-youtube", "проверка версии Zapret").map_err(|w| if w.kind == "fatal" { e } else { w })?,
-            Err(e) => return Err(e),
-        };
+        let json = net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
+        let tag = json["tag_name"].as_str().ok_or("Нет номера версии")?.to_string();
         Ok(Release { tag, url: "https://github.com/Flowseal/zapret-discord-youtube/releases/latest".into() })
-    }).await.map_err(|e| net::NetError::fatal(e.to_string()))?
+    }).await.map_err(|e| e.to_string())?
 }
 
 fn checked_domain(input: &str) -> Result<String, String> {
@@ -109,4 +100,4 @@ mod tests {
     }
 }
 mod window_chrome;
-fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains, update::app_version, update::check_app_update, update::download_app_update, update::app_update_progress, update::launch_app_update]).run(tauri::generate_context!()).expect("failed to run app"); }
+fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, update::app_version, update::check_app_update, update::app_update_progress, update::download_app_update, update::launch_app_update, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains]).run(tauri::generate_context!()).expect("failed to run app"); }

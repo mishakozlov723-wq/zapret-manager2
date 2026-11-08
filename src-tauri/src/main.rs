@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod install;
+mod net;
+mod update;
 mod control;
 mod settings;
 use serde::Serialize;
@@ -42,11 +44,10 @@ async fn detect() -> Result<Detection, String> {
 }
 
 #[tauri::command]
-async fn latest_release() -> Result<Release, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+async fn latest_release() -> Result<Release, net::NetError> {
+    tauri::async_runtime::spawn_blocking(|| -> Result<Release, net::NetError> {
         let agent = https_agent(Duration::from_secs(15))?;
-        let response = agent.get("https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest").set("User-Agent", "Retocker-Zapret-Manager").call().map_err(|e| format!("GitHub недоступен: {e}"))?;
-        let json: serde_json::Value = response.into_json().map_err(|e| format!("Не удалось прочитать ответ GitHub: {e}"))?;
+        let json = net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
         let tag = json["tag_name"].as_str().ok_or("Нет номера версии")?.to_string();
         Ok(Release { tag, url: "https://github.com/Flowseal/zapret-discord-youtube/releases/latest".into() })
     }).await.map_err(|e| e.to_string())?
@@ -99,4 +100,4 @@ mod tests {
     }
 }
 mod window_chrome;
-fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains]).run(tauri::generate_context!()).expect("failed to run app"); }
+fn main() { tauri::Builder::default().setup(|app| window_chrome::setup(app)).invoke_handler(tauri::generate_handler![detect, latest_release, check_site, install::install_release, install::disable_old_service, install::restore_old_service, update::app_version, update::check_app_update, update::app_update_progress, update::download_app_update, update::launch_app_update, control::strategies, control::strategy_action, control::strategy_status, control::overview, settings::get_settings, settings::set_folder, settings::browse, settings::make_folder, settings::save_domains]).run(tauri::generate_context!()).expect("failed to run app"); }

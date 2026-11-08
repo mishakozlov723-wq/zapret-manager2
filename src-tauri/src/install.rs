@@ -1,4 +1,5 @@
 use serde::Serialize;
+use crate::net::NetError;
 use sha2::{Digest, Sha256};
 use std::{fs::{self, File}, io::{self, Read, Write, Cursor}, path::{Path, PathBuf}, time::{Duration, SystemTime, UNIX_EPOCH}};
 
@@ -62,9 +63,9 @@ fn existing_release(base: &Path, tag: &str, digest: &str) -> Option<Installed> {
     }
     None
 }
-fn download_install(base: &Path) -> Result<Installed, String> {
+fn download_install(base: &Path) -> Result<Installed, NetError> {
     let agent = super::https_agent(Duration::from_secs(90))?;
-    let json: serde_json::Value = agent.get("https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest").set("User-Agent", "Retocker-Zapret-Manager").call().map_err(|e| format!("Не удалось получить релиз: {e}"))?.into_json().map_err(|e| e.to_string())?;
+    let json = super::net::get_json(&agent, "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest")?;
     let tag = json["tag_name"].as_str().ok_or("Нет версии релиза")?;
     if !safe_tag(tag) { return Err("Некорректный номер версии".into()); }
     let asset = json["assets"].as_array().ok_or("В релизе нет файлов")?.iter().find(|a| a["name"].as_str().map_or(false, |n| n.starts_with("zapret-discord-youtube-") && n.ends_with(".zip")) && a["state"].as_str() == Some("uploaded")).ok_or("В релизе нет официального ZIP")?;
@@ -75,8 +76,7 @@ fn download_install(base: &Path) -> Result<Installed, String> {
     let size=asset["size"].as_u64().ok_or("Неизвестный размер архива")?;
     if size == 0 || size > MAX_ZIP { return Err("Недопустимый размер архива".into()); }
     if let Some(found) = existing_release(base, tag, &digest.to_ascii_lowercase()) { return Ok(found); }
-    let response = agent.get(href).set("User-Agent", "Retocker-Zapret-Manager").call().map_err(|e| format!("Не удалось скачать архив: {e}"))?;
-    let mut bytes=Vec::new(); response.into_reader().take(MAX_ZIP+1).read_to_end(&mut bytes).map_err(|e| format!("Ошибка загрузки: {e}"))?;
+    let bytes = super::net::get_bytes(&agent, href, MAX_ZIP)?;
     if bytes.len() as u64 != size || format!("{:x}", Sha256::digest(&bytes)) != digest.to_ascii_lowercase() { return Err("Архив не прошёл проверку размера или SHA-256".into()); }
     fs::create_dir_all(base).map_err(|e| e.to_string())?;
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|e.to_string())?.as_millis();
@@ -87,8 +87,8 @@ fn download_install(base: &Path) -> Result<Installed, String> {
     Ok(Installed { tag:tag.to_owned(), folder:root.display().to_string(), reused:false })
 }
 #[tauri::command]
-pub async fn install_release() -> Result<Installed, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn install_release() -> Result<Installed, NetError> {
+    tauri::async_runtime::spawn_blocking(|| -> Result<Installed, NetError> {
         #[cfg(target_os="windows")]
         {
             let base = super::settings::downloads_dir()?;
